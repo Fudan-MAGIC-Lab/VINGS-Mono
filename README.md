@@ -26,6 +26,7 @@
     cd VINGS-Mono
     bash set_env.sh
     ```
+    - For vio settings, you can use this branch of gtsam: https://github.com/Promethe-us/gtsam/tree/vio.
 - Download pretrained checkpoints.
 ```
     mkdir ckpts & cd ckpts
