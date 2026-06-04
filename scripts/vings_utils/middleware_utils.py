@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import torch
 import numpy as np
 from lietorch import SE3
 from vings_utils.gtsam_utils import matrix_to_tq
 import cv2
-from frontend_vo.vio_slam import VioSLAM
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from frontend_vo.vio_slam import VioSLAM
 
 def tq_to_matrix(tqs: torch.Tensor):
     return SE3(tqs.cpu()).matrix()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import torch
 import lietorch
@@ -9,25 +11,35 @@ from frontend.droid_net import cvx_upsample
 import frontend.geom.projective_ops as pops
 
 from frontend.multi_sensor import MultiSensorState
-import gtsam
-from gtsam.symbol_shorthand import B, V, X
 from scipy.spatial.transform import Rotation
 import copy
 import logging
 import frontend.geoFunc.trans as trans
 from lietorch import SE3
 
+try:
+    import gtsam
+    from gtsam.symbol_shorthand import B, V, X
+except ModuleNotFoundError:
+    gtsam = None
+    B = V = X = None
+
 # cfg['use_uncertainty'] = True -  -  -  -  -  -  -  -  -  -  -  -
 # Maybe gtsam_nerfslam? 🤔
-from gtsam import (HessianFactor)
-from gtsam import Values
-from gtsam import PriorFactorPose3, NonlinearFactorGraph, GaussianFactorGraph
-from gtsam.symbol_shorthand import X
-from gtsam import Pose3
+if gtsam is not None:
+    from gtsam import (HessianFactor)
+    from gtsam import Values
+    from gtsam import PriorFactorPose3, NonlinearFactorGraph, GaussianFactorGraph
+    from gtsam import Pose3
+else:
+    HessianFactor = Values = PriorFactorPose3 = NonlinearFactorGraph = GaussianFactorGraph = Pose3 = None
 # -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
 
 import droid_backends as droid_backends_nerfslam
-from vings_utils.gtsam_utils import gtsam_pose_to_torch
+if gtsam is not None:
+    from vings_utils.gtsam_utils import gtsam_pose_to_torch
+else:
+    gtsam_pose_to_torch = None
 
 
 def BA2GTSAM(H: np.ndarray, v: np.ndarray, Tbc: gtsam.Pose3):
@@ -55,6 +67,12 @@ class DepthVideo:
                 
         # current keyframe count
         self.cfg = cfg
+        self.use_shared_memory = bool(self.cfg.get('use_shared_memory', False))
+        buffer_size = buffer + 1
+
+        def maybe_share(tensor):
+            return tensor.share_memory_() if self.use_shared_memory else tensor
+
         self.device = self.cfg['device']['tracker']
         self.counter = Value('i', 0)
         self.ready = Value('i', 0)
@@ -62,28 +80,28 @@ class DepthVideo:
         self.wd = wd = image_size[1]
 
         ### state attributes ###
-        self.tstamp = torch.zeros(buffer, device="cuda", dtype=torch.float64).share_memory_()
-        self.images = torch.zeros(buffer, 3, ht, wd, device="cuda", dtype=torch.uint8)
-        self.dirty = torch.zeros(buffer, device="cuda", dtype=torch.bool).share_memory_()
-        self.red = torch.zeros(buffer, device="cuda", dtype=torch.bool).share_memory_()
-        self.poses = torch.zeros(buffer, 7, device="cuda", dtype=torch.float).share_memory_()
+        self.tstamp = maybe_share(torch.zeros(buffer_size, device="cuda", dtype=torch.float64))
+        self.images = torch.zeros(buffer_size, 3, ht, wd, device="cuda", dtype=torch.uint8)
+        self.dirty = maybe_share(torch.zeros(buffer_size, device="cuda", dtype=torch.bool))
+        self.red = maybe_share(torch.zeros(buffer_size, device="cuda", dtype=torch.bool))
+        self.poses = maybe_share(torch.zeros(buffer_size, 7, device="cuda", dtype=torch.float))
         self.poses[:, -1] = 1
-        self.disps = torch.ones(buffer, ht//8, wd//8, device="cuda", dtype=torch.float).share_memory_()
-        self.disps_sens = torch.zeros(buffer, ht//8, wd//8, device="cuda", dtype=torch.float).share_memory_()
-        self.disps_up   = torch.zeros(buffer, ht, wd, device="cuda", dtype=torch.float).share_memory_()
-        self.intrinsics = torch.zeros(buffer, 4, device="cuda", dtype=torch.float).share_memory_()
+        self.disps = maybe_share(torch.ones(buffer_size, ht//8, wd//8, device="cuda", dtype=torch.float))
+        self.disps_sens = maybe_share(torch.zeros(buffer_size, ht//8, wd//8, device="cuda", dtype=torch.float))
+        self.disps_up   = maybe_share(torch.zeros(buffer_size, ht, wd, device="cuda", dtype=torch.float))
+        self.intrinsics = maybe_share(torch.zeros(buffer_size, 4, device="cuda", dtype=torch.float))
 
         # TTD 2024/09/24
-        self.depths_cov    = 100.0 * torch.ones(buffer, ht//8, wd//8, device="cuda", dtype=torch.float).share_memory_()
-        self.depths_cov_up = 100.0 * torch.ones(buffer, ht, wd, device="cuda", dtype=torch.float).share_memory_()
+        self.depths_cov    = maybe_share(100.0 * torch.ones(buffer_size, ht//8, wd//8, device="cuda", dtype=torch.float))
+        self.depths_cov_up = maybe_share(100.0 * torch.ones(buffer_size, ht, wd, device="cuda", dtype=torch.float))
         
         self.stereo = stereo
         c = 1 if not self.stereo else 2
 
         ### feature attributes ###
-        self.fmaps = torch.zeros(buffer, c, 128, ht//8, wd//8, dtype=torch.half, device="cuda").share_memory_()
-        self.nets = torch.zeros(buffer, 128, ht//8, wd//8, dtype=torch.half, device="cuda").share_memory_()
-        self.inps = torch.zeros(buffer, 128, ht//8, wd//8, dtype=torch.half, device="cuda").share_memory_()
+        self.fmaps = maybe_share(torch.zeros(buffer_size, c, 128, ht//8, wd//8, dtype=torch.half, device="cuda"))
+        self.nets = maybe_share(torch.zeros(buffer_size, 128, ht//8, wd//8, dtype=torch.half, device="cuda"))
+        self.inps = maybe_share(torch.zeros(buffer_size, 128, ht//8, wd//8, dtype=torch.half, device="cuda"))
 
         # initialize poses to identity transformation
         self.poses[:] = torch.as_tensor([0, 0, 0, 0, 0, 0, 1], dtype=torch.float, device="cuda")
@@ -101,14 +119,27 @@ class DepthVideo:
         self.tstamp_save = torch.zeros(SAVE_BUFFER_SIZE, device="cpu", dtype=torch.float64)
         self.images_save = torch.zeros(SAVE_BUFFER_SIZE, ht//8, wd//8, 3, device="cpu", dtype=torch.float)
         if upsample:
-            self.disps_up_save  = torch.zeros(SAVE_BUFFER_SIZE, ht, wd, device="cpu", dtype=torch.float).share_memory_()
-            self.depths_cov_up_save = 100.0 * torch.ones(SAVE_BUFFER_SIZE, ht, wd, device="cpu", dtype=torch.float).share_memory_()
-            self.images_up_save = torch.zeros(SAVE_BUFFER_SIZE, ht, wd, 3, device="cpu", dtype=torch.float).share_memory_()
+            self.disps_up_save  = maybe_share(torch.zeros(SAVE_BUFFER_SIZE, ht, wd, device="cpu", dtype=torch.float))
+            self.depths_cov_up_save = maybe_share(100.0 * torch.ones(SAVE_BUFFER_SIZE, ht, wd, device="cpu", dtype=torch.float))
+            self.images_up_save = maybe_share(torch.zeros(SAVE_BUFFER_SIZE, ht, wd, 3, device="cpu", dtype=torch.float))
         self.count_save = 0
         self.save_pkl = save_pkl
         self.upsample_flag = upsample
 
-        self.state = MultiSensorState()
+        self.imu_enabled = False
+        if self.cfg['mode'] == 'vio':
+            if gtsam is None:
+                raise ModuleNotFoundError(
+                    "gtsam is required for VIO mode. Use mode=vo or install gtsam with Python>=3.9."
+                )
+            self.state = MultiSensorState()
+            self.ignore_imu = False
+        elif self.cfg['mode'] == 'vo':
+            self.state = None
+            self.ignore_imu = True
+        else:
+            raise ValueError('Invalid mode')
+
         self.last_t0 = 0
         self.last_t1 = 0
         self.cur_graph = None
@@ -122,14 +153,6 @@ class DepthVideo:
         self.cur_weight = None
         self.cur_eta = None
 
-        self.imu_enabled = False
-        if self.cfg['mode'] == 'vio':
-            self.ignore_imu = False
-        elif self.cfg['mode'] == 'vo':
-            self.ignore_imu = True
-        else:
-            raise ValueError('Invalid mode')
-        
         self.xyz_ref = []
         
         # extrinsics, need to be set in the main .py

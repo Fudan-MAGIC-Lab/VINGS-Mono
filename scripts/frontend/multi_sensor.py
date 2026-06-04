@@ -1,11 +1,19 @@
 import numpy as np
-import gtsam
 import math
+
+try:
+    import gtsam
+except ModuleNotFoundError:
+    gtsam = None
 
 GRAVITY = 9.807
 
 class MultiSensorState:
     def __init__(self):
+        if gtsam is None:
+            raise ModuleNotFoundError(
+                "gtsam is required for VIO mode. Use mode=vo or install gtsam with Python>=3.9."
+            )
         self.cur_t = 0.0
 
         """ IMU-centered states """

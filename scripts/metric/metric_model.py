@@ -2,7 +2,28 @@ import torch
 import cv2
 import numpy as np
 import sys
-sys.path.append('/data/wuke/workspace/VINGS-Mono/submodules/')
+from pathlib import Path
+
+
+def _find_repo_root() -> Path:
+    current = Path(__file__).resolve()
+    candidates = []
+    for parent in current.parents:
+        candidates.append(parent)
+        if parent.name == '.worktrees' and parent.parent not in candidates:
+            candidates.append(parent.parent)
+
+    for root in candidates:
+        if (root / 'submodules' / 'metric_modules' / '__init__.py').is_file():
+            return root
+
+    raise FileNotFoundError("Unable to locate repository root containing submodules/metric_modules")
+
+
+REPO_ROOT = _find_repo_root()
+SUBMODULES_ROOT = REPO_ROOT / 'submodules'
+if str(SUBMODULES_ROOT) not in sys.path:
+    sys.path.append(str(SUBMODULES_ROOT))
 from metric_modules import Metric
 # from metric.metric3d import Metric3D_Model
 
@@ -22,8 +43,12 @@ class Metric_Model:
         '''
         Metric3D
         '''
-        import os
-        ckpt_path = 'ckpts/metric_depth_vit_small_800k.pth'
+        ckpt_path = REPO_ROOT / 'ckpts' / 'metric_depth_vit_small_800k.pth'
+        if not ckpt_path.is_file():
+            raise FileNotFoundError(
+                f"Metric checkpoint not found: {ckpt_path}. "
+                "Download metric_depth_vit_small_800k.pth into ckpts/ before enabling metric."
+            )
         # self.predictor = Metric(checkpoint='/data/wuke/workspace/droid_metric/weights/metric_depth_vit_small_800k.pth', model_name='v2-S')
         self.predictor = Metric(checkpoint=ckpt_path, model_name='v2-S')
         if u_scale is None:

@@ -1,7 +1,11 @@
-import wandb
 import random
 import torch
 import os
+
+try:
+    import wandb
+except ModuleNotFoundError:
+    wandb = None
 
 # os.environ["WANDB__SERVICE_WAIT"] = "300"
 
@@ -10,6 +14,8 @@ class Wandber:
     def __init__(self, cfg, customize_name):
         self.cfg = cfg
         if cfg['use_wandb']:
+            if wandb is None:
+                raise ModuleNotFoundError("wandb is required when use_wandb is True.")
             wandb.login(key='bff8fb59d5f957b13c5cba24cd62055f759339d4')
             self.wandb = wandb.init(project="Droid2DAcc", name=customize_name)
             wandb.ensure_configured()

@@ -6,7 +6,10 @@ from lietorch import SE3, SO3
 from frontend.covisible_graph import CovisibleGraph
 import matplotlib.pyplot as plt
 
-import gtsam
+try:
+    import gtsam
+except ModuleNotFoundError:
+    gtsam = None
 import math
 import bisect
 from math import atan2, cos, sin
@@ -153,19 +156,24 @@ class DBAFusionFrontend:
             self.video.marg_factor = self.video.marg_factor.rekey((np.array(self.video.marg_factor.keys())-roll).tolist())
         
         
-        self.video.state.timestamps           = self.video.state.timestamps           [roll:]
-        self.video.state.wTbs                 = self.video.state.wTbs                 [roll:]
-        self.video.state.vs                   = self.video.state.vs                   [roll:]
-        self.video.state.bs                   = self.video.state.bs                   [roll:]
-        self.video.state.preintegrations      = self.video.state.preintegrations      [roll:]
-        self.video.state.preintegrations_meas = self.video.state.preintegrations_meas [roll:]
-        self.video.state.gnss_valid           = self.video.state.gnss_valid           [roll:]
-        self.video.state.gnss_position        = self.video.state.gnss_position        [roll:]
-        self.video.state.odo_valid            = self.video.state.odo_valid            [roll:]
-        self.video.state.odo_vel              = self.video.state.odo_vel              [roll:]
+        if self.video.state is not None:
+            self.video.state.timestamps           = self.video.state.timestamps           [roll:]
+            self.video.state.wTbs                 = self.video.state.wTbs                 [roll:]
+            self.video.state.vs                   = self.video.state.vs                   [roll:]
+            self.video.state.bs                   = self.video.state.bs                   [roll:]
+            self.video.state.preintegrations      = self.video.state.preintegrations      [roll:]
+            self.video.state.preintegrations_meas = self.video.state.preintegrations_meas [roll:]
+            self.video.state.gnss_valid           = self.video.state.gnss_valid           [roll:]
+            self.video.state.gnss_position        = self.video.state.gnss_position        [roll:]
+            self.video.state.odo_valid            = self.video.state.odo_valid            [roll:]
+            self.video.state.odo_vel              = self.video.state.odo_vel              [roll:]
 
     def __update(self):
         """ add edges, perform update """
+        if self.video.imu_enabled and gtsam is None:
+            raise ModuleNotFoundError(
+                "gtsam is required when IMU mode is enabled."
+            )
         self.new_frame_added = False
         self.count += 1
         self.t1 += 1
@@ -178,73 +186,74 @@ class DBAFusionFrontend:
         cur_t = float(self.video.tstamp[self.t1-1].detach().cpu())
         # self.video.logger.info('predict %f' %cur_t)
 
-        while self.all_imu[self.cur_imu_ii][0] < cur_t:
-            ## high-frequency output
-            # predict the pose of skipped frames through IMU preintegration
-            if self.high_freq_output and self.video.imu_enabled: 
-                if self.all_imu[self.cur_imu_ii][0] > float(self.all_stamp[self.cur_stamp_ii][0]):
-                    self.video.state.append_imu_temp(float(self.all_stamp[self.cur_stamp_ii][0]),\
-                                                    self.all_imu[self.cur_imu_ii][4:7],\
-                                                    self.all_imu[self.cur_imu_ii][1:4]/180*math.pi,True)
-                    if float(self.all_stamp[self.cur_stamp_ii][0]) > self.video.state.timestamps[-1] and\
-                          math.fabs(cur_t - float(self.all_stamp[self.cur_stamp_ii][0]))>1e-3:
-                        pose_temp = self.video.state.pose_temp
-                        ppp = pose_temp.pose().translation()
-                        qqq = Rotation.from_matrix(pose_temp.pose().rotation().matrix()).as_quat()
-                        line = '%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f'%(float(self.all_stamp[self.cur_stamp_ii][0]),ppp[0],ppp[1],ppp[2]\
-                                            ,qqq[0],qqq[1],qqq[2],qqq[3])
-                        if self.video.gnss_init_t1>0:
-                            p = self.video.ten0 + np.matmul(trans.Cen(self.video.ten0), ppp)
-                            line += ' %.6f %.6f %.6f'% (p[0],p[1],p[2]) 
-                        
-                    self.cur_stamp_ii += 1
-                self.video.state.append_imu_temp(self.all_imu[self.cur_imu_ii][0],\
-                                    self.all_imu[self.cur_imu_ii][4:7],\
-                                    self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+        if (not self.visual_only) and (self.video.state is not None):
+            while self.all_imu[self.cur_imu_ii][0] < cur_t:
+                ## high-frequency output
+                # predict the pose of skipped frames through IMU preintegration
+                if self.high_freq_output and self.video.imu_enabled: 
+                    if self.all_imu[self.cur_imu_ii][0] > float(self.all_stamp[self.cur_stamp_ii][0]):
+                        self.video.state.append_imu_temp(float(self.all_stamp[self.cur_stamp_ii][0]),\
+                                                        self.all_imu[self.cur_imu_ii][4:7],\
+                                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi,True)
+                        if float(self.all_stamp[self.cur_stamp_ii][0]) > self.video.state.timestamps[-1] and\
+                              math.fabs(cur_t - float(self.all_stamp[self.cur_stamp_ii][0]))>1e-3:
+                            pose_temp = self.video.state.pose_temp
+                            ppp = pose_temp.pose().translation()
+                            qqq = Rotation.from_matrix(pose_temp.pose().rotation().matrix()).as_quat()
+                            line = '%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f'%(float(self.all_stamp[self.cur_stamp_ii][0]),ppp[0],ppp[1],ppp[2]\
+                                                ,qqq[0],qqq[1],qqq[2],qqq[3])
+                            if self.video.gnss_init_t1>0:
+                                p = self.video.ten0 + np.matmul(trans.Cen(self.video.ten0), ppp)
+                                line += ' %.6f %.6f %.6f'% (p[0],p[1],p[2]) 
+                            
+                        self.cur_stamp_ii += 1
+                    self.video.state.append_imu_temp(self.all_imu[self.cur_imu_ii][0],\
+                                        self.all_imu[self.cur_imu_ii][4:7],\
+                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+                
+                self.video.state.append_imu(self.all_imu[self.cur_imu_ii][0],\
+                                        self.all_imu[self.cur_imu_ii][4:7],\
+                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+                self.cur_imu_ii += 1
+                '''
+                self.all_imu[self.cur_imu_ii]
+                '''
+            # ---------------------------------------------------------------------------
+
+            self.video.state.append_imu(cur_t,\
+                                        self.all_imu[self.cur_imu_ii][4:7],\
+                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+            self.video.state.append_img(cur_t)
             
+            ## append GNSS, self.all_gnss=[]
+            if len(self.all_gnss) > 0: gnss_found = bisect.bisect(self.all_gnss[:,0],cur_t - 1e-6)
+            else: gnss_found = -1        
+            if gnss_found > 0 and self.all_gnss[gnss_found,0] - cur_t < 0.01 :
+                self.video.state.append_gnss(cur_t,self.all_gnss[gnss_found,1:4])
+
+            ## append ZUPT, self.zupt=False
+            if self.zupt and self.video.state.preintegrations[self.t1-3].deltaTij() > 3.0:
+                if np.linalg.norm(self.video.state.vs[self.t1-2]) < 0.025:
+                    self.video.state.append_odo(cur_t,np.array([.0,.0,.0]))
+
+            ## append ODO, self.all_odo=[]
+            if len(self.all_odo) > 0: odo_found = bisect.bisect(self.all_odo[:,0],cur_t - 1e-6)
+            else: odo_found = -1        
+            if odo_found > 0 and self.all_odo[odo_found,0] - cur_t < 0.01 :
+                self.video.state.append_odo(cur_t,self.all_odo[odo_found,1:4])
+
             self.video.state.append_imu(self.all_imu[self.cur_imu_ii][0],\
-                                    self.all_imu[self.cur_imu_ii][4:7],\
-                                    self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+                            self.all_imu[self.cur_imu_ii][4:7],\
+                            self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
             self.cur_imu_ii += 1
-            '''
-            self.all_imu[self.cur_imu_ii]
-            '''
-        # ---------------------------------------------------------------------------
 
-        self.video.state.append_imu(cur_t,\
-                                    self.all_imu[self.cur_imu_ii][4:7],\
-                                    self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
-        self.video.state.append_img(cur_t)
-        
-        ## append GNSS, self.all_gnss=[]
-        if len(self.all_gnss) > 0: gnss_found = bisect.bisect(self.all_gnss[:,0],cur_t - 1e-6)
-        else: gnss_found = -1        
-        if gnss_found > 0 and self.all_gnss[gnss_found,0] - cur_t < 0.01 :
-            self.video.state.append_gnss(cur_t,self.all_gnss[gnss_found,1:4])
-
-        ## append ZUPT, self.zupt=False
-        if self.zupt and self.video.state.preintegrations[self.t1-3].deltaTij() > 3.0:
-            if np.linalg.norm(self.video.state.vs[self.t1-2]) < 0.025:
-                self.video.state.append_odo(cur_t,np.array([.0,.0,.0]))
-
-        ## append ODO, self.all_odo=[]
-        if len(self.all_odo) > 0: odo_found = bisect.bisect(self.all_odo[:,0],cur_t - 1e-6)
-        else: odo_found = -1        
-        if odo_found > 0 and self.all_odo[odo_found,0] - cur_t < 0.01 :
-            self.video.state.append_odo(cur_t,self.all_odo[odo_found,1:4])
-
-        self.video.state.append_imu(self.all_imu[self.cur_imu_ii][0],\
-                        self.all_imu[self.cur_imu_ii][4:7],\
-                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
-        self.cur_imu_ii += 1
-
-        ## predict pose (<5 ms)
-        if self.video.imu_enabled:
-            Twc = (self.video.state.wTbs[-1] * self.video.Tbc).matrix()
-            TTT = torch.tensor(np.linalg.inv(Twc))
-            q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
-            t = TTT[:3,3]
-            self.video.poses[self.t1-1] = torch.cat([t,q])
+            ## predict pose (<5 ms)
+            if self.video.imu_enabled:
+                Twc = (self.video.state.wTbs[-1] * self.video.Tbc).matrix()
+                TTT = torch.tensor(np.linalg.inv(Twc))
+                q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
+                t = TTT[:3,3]
+                self.video.poses[self.t1-1] = torch.cat([t,q])
 
         # self.video.logger.info('manage edges')
 
@@ -308,10 +317,11 @@ class DBAFusionFrontend:
             self.plt_att[0].append(a1[0])
             self.plt_att[1].append(a1[1])
             self.plt_att[2].append(a1[2])
-            bg = self.video.state.bs[self.t1-1].gyroscope()
-            self.plt_bg[0].append(bg[0])
-            self.plt_bg[1].append(bg[1])
-            self.plt_bg[2].append(bg[2])
+            if self.video.state is not None:
+                bg = self.video.state.bs[self.t1-1].gyroscope()
+                self.plt_bg[0].append(bg[0])
+                self.plt_bg[1].append(bg[1])
+                self.plt_bg[2].append(bg[2])
             self.plt_t.append(cur_t)
             
             if self.rollup:
@@ -346,28 +356,29 @@ class DBAFusionFrontend:
         if (d.item() < self.keyframe_thresh):
             self.graph.rm_keyframe(self.t1 - 2)
 
-            # merge preintegration[self.t1-2] and preintegration[self.t1-3]
-            for iii in range(len(self.video.state.preintegrations_meas[self.t1-2])):
-                dd = self.video.state.preintegrations_meas[self.t1-2][iii]
-                if dd[2] > 0:
-                    self.video.state.preintegrations[self.t1-3].integrateMeasurement(dd[0],\
-                                                                                     dd[1],\
-                                                                                     dd[2])
-                self.video.state.preintegrations_meas[self.t1-3].append(dd)
-                
-            self.video.state.preintegrations[self.t1-2] = self.video.state.preintegrations[self.t1-1]
-            self.video.state.preintegrations_meas[self.t1-2] = self.video.state.preintegrations_meas[self.t1-1]
-            self.video.state.preintegrations.pop()
-            self.video.state.preintegrations_meas.pop()
+            if (not self.visual_only) and (self.video.state is not None):
+                # merge preintegration[self.t1-2] and preintegration[self.t1-3]
+                for iii in range(len(self.video.state.preintegrations_meas[self.t1-2])):
+                    dd = self.video.state.preintegrations_meas[self.t1-2][iii]
+                    if dd[2] > 0:
+                        self.video.state.preintegrations[self.t1-3].integrateMeasurement(dd[0],\
+                                                                                         dd[1],\
+                                                                                         dd[2])
+                    self.video.state.preintegrations_meas[self.t1-3].append(dd)
+                    
+                self.video.state.preintegrations[self.t1-2] = self.video.state.preintegrations[self.t1-1]
+                self.video.state.preintegrations_meas[self.t1-2] = self.video.state.preintegrations_meas[self.t1-1]
+                self.video.state.preintegrations.pop()
+                self.video.state.preintegrations_meas.pop()
 
-            self.video.rm_new_gnss(self.t1-2)
-            self.video.state.wTbs[self.t1-2] = self.video.state.wTbs[self.t1-1]; self.video.state.wTbs.pop()
-            self.video.state.bs  [self.t1-2] = self.video.state.bs  [self.t1-1]; self.video.state.bs.pop()
-            self.video.state.vs  [self.t1-2] = self.video.state.vs  [self.t1-1]; self.video.state.vs .pop()
-            self.video.state.gnss_valid     [self.t1-2] = self.video.state.gnss_valid     [self.t1-1]; self.video.state.gnss_valid .pop()
-            self.video.state.gnss_position  [self.t1-2] = self.video.state.gnss_position  [self.t1-1]; self.video.state.gnss_position .pop()
-            self.video.state.odo_valid      [self.t1-2] = self.video.state.odo_valid      [self.t1-1]; self.video.state.odo_valid .pop()
-            self.video.state.odo_vel        [self.t1-2] = self.video.state.odo_vel        [self.t1-1]; self.video.state.odo_vel .pop()            
+                self.video.rm_new_gnss(self.t1-2)
+                self.video.state.wTbs[self.t1-2] = self.video.state.wTbs[self.t1-1]; self.video.state.wTbs.pop()
+                self.video.state.bs  [self.t1-2] = self.video.state.bs  [self.t1-1]; self.video.state.bs.pop()
+                self.video.state.vs  [self.t1-2] = self.video.state.vs  [self.t1-1]; self.video.state.vs .pop()
+                self.video.state.gnss_valid     [self.t1-2] = self.video.state.gnss_valid     [self.t1-1]; self.video.state.gnss_valid .pop()
+                self.video.state.gnss_position  [self.t1-2] = self.video.state.gnss_position  [self.t1-1]; self.video.state.gnss_position .pop()
+                self.video.state.odo_valid      [self.t1-2] = self.video.state.odo_valid      [self.t1-1]; self.video.state.odo_valid .pop()
+                self.video.state.odo_vel        [self.t1-2] = self.video.state.odo_vel        [self.t1-1]; self.video.state.odo_vel .pop()            
 
             with self.video.get_lock():
                 self.video.counter.value -= 1
@@ -380,7 +391,7 @@ class DBAFusionFrontend:
             self.new_frame_added = True
             
         ## try initializing VI/GNSS
-        if self.t1 > self.vi_warmup and self.video.vi_init_t1 < 0:
+        if (not self.visual_only) and self.t1 > self.vi_warmup and self.video.vi_init_t1 < 0:
             self.init_VI()
             if not self.visual_only:
                 for i in range(len(self.all_stamp)): # skip to next image
@@ -852,7 +863,8 @@ class DBAFusionFrontend:
 
         self.graph.add_neighborhood_factors(self.t0, self.t1, r=3)
 
-        self.init_IMU()
+        if not self.visual_only:
+            self.init_IMU()
 
         self.graph.video.imu_enabled = False
         for itr in range(8):

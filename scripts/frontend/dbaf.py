@@ -7,11 +7,15 @@ from frontend.motion_filter import MotionFilter
 from frontend.dbaf_frontend import DBAFusionFrontend
 from collections import OrderedDict
 from torch.multiprocessing import Process
-import gtsam
 from lietorch import SE3
 import frontend.geom.projective_ops as pops
 import droid_backends
 import pickle
+
+try:
+    import gtsam
+except ModuleNotFoundError:
+    gtsam = None
 
 class DBAFusion:
     def __init__(self, cfg):
@@ -22,10 +26,17 @@ class DBAFusion:
         # store images, depth, poses, intrinsics (shared between processes)
         self.video = DepthVideo(cfg, cfg['frontend']['image_size'], cfg['frontend']['buffer'])
         self.video.Ti1c = cfg['frontend']['c2i']
-        self.video.Tbc = gtsam.Pose3(self.video.Ti1c)
-        self.video.state.set_imu_params([ 0.0003924 * 25,0.000205689024915 * 25, 0.004905 * 10, 0.000001454441043 * 500])
-        self.video.init_pose_sigma = np.array([1.0, 1.0, 0.0001, 1.0, 1.0, 1.0])
-        self.video.init_bias_sigma = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+        if cfg['mode'] == 'vio':
+            if gtsam is None:
+                raise ModuleNotFoundError(
+                    "gtsam is required for VIO mode. Use mode=vo or install gtsam with Python>=3.9."
+                )
+            self.video.Tbc = gtsam.Pose3(self.video.Ti1c)
+            self.video.state.set_imu_params([ 0.0003924 * 25,0.000205689024915 * 25, 0.004905 * 10, 0.000001454441043 * 500])
+            self.video.init_pose_sigma = np.array([1.0, 1.0, 0.0001, 1.0, 1.0, 1.0])
+            self.video.init_bias_sigma = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+        else:
+            self.video.Tbc = None
 
         # filter incoming frames so that there is enough motion
         self.filterx = MotionFilter(self.net, self.video, thresh=cfg['frontend']['filter_thresh'])
@@ -45,7 +56,9 @@ class DBAFusion:
         print(weights)
         self.net = DroidNet()
         state_dict = OrderedDict([
-            (k.replace("module.", ""), v) for (k, v) in torch.load(weights).items()])
+            (k.replace("module.", ""), v)
+            for (k, v) in torch.load(weights, map_location="cpu").items()
+        ])
 
         state_dict["update.weight.2.weight"] = state_dict["update.weight.2.weight"][:2]
         state_dict["update.weight.2.bias"] = state_dict["update.weight.2.bias"][:2]

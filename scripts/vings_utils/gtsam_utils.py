@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 from lietorch import SE3
 import torch
 import numpy as np
 from scipy.spatial.transform import Rotation
-import gtsam
+
+try:
+    import gtsam
+except ModuleNotFoundError:
+    gtsam = None
 def tq_to_matrix(tqs: torch.Tensor):
     """
     Convert a tensor of TQs to a matrix.
@@ -20,6 +26,8 @@ def matrix_to_tq(matrix: torch.Tensor):
 
 
 def gtsam_pose_to_torch(pose: gtsam.Pose3, device, dtype):
+    if gtsam is None:
+        raise ModuleNotFoundError("gtsam is required for gtsam_pose_to_torch.")
     t = pose.translation()
     # q = pose.rotation().quaternion()
     # TTD 2024/04/21

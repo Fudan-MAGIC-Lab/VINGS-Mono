@@ -13,7 +13,19 @@ from gaussian.general_utils import inverse_sigmoid
 from abc import ABCMeta, abstractmethod
 from gaussian.loss_utils import get_loss, get_pixel_mask, l1_loss
 from gaussian.normal_utils import depth_propagate_normal
-from gaussian.vis_utils import vis_rgbdnua, load_ply, calc_psnr
+try:
+    from gaussian.vis_utils import vis_rgbdnua, load_ply, calc_psnr
+except ModuleNotFoundError as exc:
+    _vis_utils_import_error = exc
+
+    def _missing_vis_utils(*args, **kwargs):
+        raise ModuleNotFoundError(
+            "gaussian.vis_utils optional dependencies are missing (e.g., open3d)."
+        ) from _vis_utils_import_error
+
+    vis_rgbdnua = _missing_vis_utils
+    load_ply = _missing_vis_utils
+    calc_psnr = _missing_vis_utils
 # from utils.gtsam_utils import matrix_to_tq
 import copy
 import time
@@ -411,7 +423,7 @@ class GaussianBase:
             # self.wandber.log_time('Time_PerIter')
 
             # TTD 2024/12/29 dangerous option.
-            if True and curr_iter == train_iters - 1:
+            if self.cfg.get('use_vis', False) and curr_iter == train_iters - 1:
                 gt_dict['pose'] = c2w
                 gt_dict['abs_frame_idx_list'] = batch["viz_out_idx_to_f_idx"]
                 frame_id = batch["viz_out_idx_to_f_idx"][curr_id]

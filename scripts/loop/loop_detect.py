@@ -17,7 +17,7 @@ class LoopDetector:
     def __init__(self, cfg):
         # -  -  -  -  -  -  -  -  -  -  -  -  -  -
         self.cfg = cfg
-        ONNX_W = 512
+        ONNX_W = cfg.get('looper', {}).get('onnx_w', 512)
         H, W = cfg['frontend']['image_size'][0], cfg['frontend']['image_size'][1]
         WEIGHT_DIR = cfg['looper']['lightglue_weight_dir'] # '/data/wuke/workspace/LightGlue-ONNX/weights/'
         # -  -  -  -  -  -  -  -  -  -  -  -  -  -
@@ -26,8 +26,11 @@ class LoopDetector:
         # torch.set_grad_enabled(False)
         self.device = torch.device(cfg['device']['mapper'])
         
-        # providers = ["CPUExecutionProvider"]
-        providers = ["CUDAExecutionProvider"]
+        onnx_provider = cfg.get('looper', {}).get('onnx_provider', 'cuda')
+        if onnx_provider == 'cpu':
+            providers = ["CPUExecutionProvider"]
+        else:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         # providers = [("TensorrtExecutionProvider", {"trt_fp16_enable": True, "trt_engine_cache_enable": True, "trt_engine_cache_path": "weights/cache"})]
         self.matcher = LightGlueRunner(
             extractor_path=f"{WEIGHT_DIR}/superpoint.onnx",
