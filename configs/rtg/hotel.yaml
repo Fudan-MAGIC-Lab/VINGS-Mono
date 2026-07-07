@@ -72,6 +72,14 @@ mapping_budget:
   new_gaussian_budgets: [40000, 25000, 12000, 6000]
   min_new_gaussians: 2000
   log: True
+pruning_budget:
+  enabled: False
+  gaussian_thresholds: [150000, 300000, 600000]
+  intervals: [4, 3, 2, 1]
+  low_thresholds: [0.05, 0.05, 0.04, 0.03]
+  high_thresholds: [0.8, 0.75, 0.7, 0.65]
+  max_prune_ratios: [0.05, 0.08, 0.12, 0.16]
+  log: True
 training_args:
   num_keyframe: 8
   iters: 50

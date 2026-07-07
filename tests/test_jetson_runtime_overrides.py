@@ -160,6 +160,29 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
 
         self.assertTrue(updated["mapping_budget"]["enabled"])
 
+    def test_run_py_can_enable_jetson_pruning_budget(self):
+        globals_dict = _load_run_globals(
+            [
+                "run.py",
+                "dummy.yaml",
+                "--enable-jetson-pruning",
+            ]
+        )
+
+        cfg = {
+            "dataset": {},
+            "output": {},
+            "frontend": {},
+            "device": {},
+            "looper": {},
+            "pruning_budget": {"enabled": False},
+            "training_args": {"iters": 30},
+        }
+
+        updated = globals_dict["apply_overrides"](cfg)
+
+        self.assertTrue(updated["pruning_budget"]["enabled"])
+
     def test_metric_model_exposes_repo_root_locator(self):
         globals_dict = _load_metric_globals()
 

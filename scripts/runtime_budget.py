@@ -57,9 +57,13 @@ class RuntimeBudgetController:
             runtime_cfg.get("keyframe_thresholds"),
             [120, 220],
         )
+        mapping_thresholds = cfg.get("mapping_budget", {}).get("gaussian_thresholds")
+        default_gaussian_thresholds = [150000, 300000]
+        if mapping_thresholds is not None:
+            default_gaussian_thresholds = list(mapping_thresholds[:2])
         self.gaussian_thresholds = _normalize_thresholds(
             runtime_cfg.get("gaussian_thresholds"),
-            [150000, 300000],
+            default_gaussian_thresholds,
         )
 
     def _resolve_stage(self, progress, keyframe_id, gaussian_count):

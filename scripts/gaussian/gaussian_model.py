@@ -25,6 +25,7 @@ from gaussian.normal_utils import depth_propagate_normal
 from vings_utils.refineposes_utils import get_xyz_bias_multi, get_new_xyz_single
 from gaussian.loss_utils import l1_loss, ssim_loss
 from gaussian.mapping_budget import select_new_gaussian_budget
+from gaussian.pruning_budget import cap_prune_mask_by_score, select_pruning_budget
 
 
 class GaussianModel(GaussianBase):
@@ -252,8 +253,13 @@ class GaussianModel(GaussianBase):
         
     # TODO: Iter over all history frames.
     def storage_control(self, current_iter, batch):
+        pruning_budget = select_pruning_budget(
+            self.cfg,
+            current_gaussians=int(self._xyz.shape[0]),
+            time_idx=self.time_idx,
+        )
         if (current_iter == self.cfg['training_args']['iters'] - 1) and \
-           (self.time_idx+1) % 4 == 0:
+           pruning_budget["should_prune"]:
             # (self.time_idx+1) % self.cfg['training_args']['num_keyframe'] == 0:
             # Rerender on whole keyframe list and prune unstable gaussians whose _local_scores[:, 0] < 1.0.
             temp_importance_scores = torch.zeros_like(self._local_scores[:, 0]) # (P, )
@@ -268,7 +274,30 @@ class GaussianModel(GaussianBase):
             # prune_gaussianmask = (temp_importance_scores > 0.1) & (~self._stable_mask) & (temp_importance_scores < 0.8)    
             # prune_gaussianmask = (temp_importance_scores > 0.05) & (~self._stable_mask) & (temp_importance_scores < 0.8)
             # Ablation TTD 2024/12/04
-            prune_gaussianmask = (temp_importance_scores > 0.05) & (~self._stable_mask) & (temp_importance_scores < 0.8)
+            prune_gaussianmask = (
+                (temp_importance_scores > pruning_budget["low_threshold"])
+                & (~self._stable_mask)
+                & (temp_importance_scores < pruning_budget["high_threshold"])
+            )
+            max_prune_count = int(self._xyz.shape[0] * pruning_budget["max_prune_ratio"])
+            prune_gaussianmask = cap_prune_mask_by_score(
+                prune_gaussianmask,
+                temp_importance_scores,
+                max_prune_count=max_prune_count,
+            )
+            prune_count = int(prune_gaussianmask.sum().item())
+            if pruning_budget["enabled"] and self.cfg.get("pruning_budget", {}).get("log", True):
+                print(
+                    "[pruning_budget] "
+                    f"enabled={int(pruning_budget['enabled'])} "
+                    f"stage={pruning_budget['stage']} "
+                    f"interval={pruning_budget['interval']} "
+                    f"gaussians_before={int(self._xyz.shape[0])} "
+                    f"low={pruning_budget['low_threshold']:.4f} "
+                    f"high={pruning_budget['high_threshold']:.4f} "
+                    f"max_ratio={pruning_budget['max_prune_ratio']:.4f} "
+                    f"pruned={prune_count}"
+                )
             new_dict = self.prune_tensors_from_optimizer(self.optimizer, prune_gaussianmask)
             self.update_properties(new_dict)
             self.update_records(mode="prune", prune_gaussianmask=prune_gaussianmask)

@@ -19,12 +19,14 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('training_iters="${VINGS_TRAINING_ITERS:-30}"', content)
         self.assertIn('adaptive_runtime="${VINGS_ADAPTIVE_RUNTIME:-1}"', content)
         self.assertIn('mapping_budget="${VINGS_MAPPING_BUDGET:-0}"', content)
+        self.assertIn('pruning_budget="${VINGS_PRUNING_BUDGET:-0}"', content)
         self.assertIn('lightglue_weight_dir="${VINGS_LIGHTGLUE_DIR:-$shared_root/ckpts/lightglue}"', content)
         self.assertIn('--loop-onnx-provider "$loop_onnx_provider"', content)
         self.assertIn('--frontend-image-size "$frontend_image_size"', content)
         self.assertIn('--training-iters "$training_iters"', content)
         self.assertIn('adaptive_runtime_args+=(--adaptive-runtime)', content)
         self.assertIn('mapping_budget_args+=(--enable-mapping-budget)', content)
+        self.assertIn('pruning_budget_args+=(--enable-jetson-pruning)', content)
 
 
 if __name__ == "__main__":

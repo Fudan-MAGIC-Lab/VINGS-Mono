@@ -71,6 +71,23 @@ class RuntimeBudgetControllerTests(unittest.TestCase):
         self.assertFalse(budget["should_run_vis"])
         self.assertTrue(budget["should_run_loop"])
 
+    def test_runtime_gaussian_thresholds_default_to_mapping_budget_thresholds(self):
+        module = _load_runtime_budget_module()
+        controller = module.RuntimeBudgetController(
+            {
+                "training_args": {"iters": 30},
+                "mapping_budget": {"gaussian_thresholds": [10, 20, 30]},
+                "runtime_budget": {"enabled": True},
+            },
+            dataset_length=1000,
+        )
+
+        mid = controller.evaluate(frame_idx=0, keyframe_id=0, gaussian_count=12)
+        late = controller.evaluate(frame_idx=0, keyframe_id=0, gaussian_count=22)
+
+        self.assertEqual(mid["stage"], 1)
+        self.assertEqual(late["stage"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
