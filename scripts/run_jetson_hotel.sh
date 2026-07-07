@@ -20,12 +20,18 @@ loop_onnx_provider="${VINGS_LOOP_ONNX_PROVIDER:-cpu}"
 frontend_image_size="${VINGS_FRONTEND_IMAGE_SIZE:-256,448}"
 training_iters="${VINGS_TRAINING_ITERS:-30}"
 adaptive_runtime="${VINGS_ADAPTIVE_RUNTIME:-1}"
+mapping_budget="${VINGS_MAPPING_BUDGET:-0}"
 tracker_device="${VINGS_TRACKER_DEVICE:-cuda:0}"
 mapper_device="${VINGS_MAPPER_DEVICE:-cuda:0}"
 
 adaptive_runtime_args=()
 if [ "$adaptive_runtime" != "0" ]; then
   adaptive_runtime_args+=(--adaptive-runtime)
+fi
+
+mapping_budget_args=()
+if [ "$mapping_budget" != "0" ]; then
+  mapping_budget_args+=(--enable-mapping-budget)
 fi
 
 if [ ! -d "$dataset_root/nosky_color" ]; then
@@ -61,5 +67,6 @@ python scripts/run.py \
   --frontend-image-size "$frontend_image_size" \
   --training-iters "$training_iters" \
   "${adaptive_runtime_args[@]}" \
+  "${mapping_budget_args[@]}" \
   --device-tracker "$tracker_device" \
   --device-mapper "$mapper_device"

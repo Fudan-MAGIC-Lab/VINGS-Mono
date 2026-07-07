@@ -24,6 +24,7 @@ from gaussian.normal_utils import depth_propagate_normal
 # TTD 2024/11/17
 from vings_utils.refineposes_utils import get_xyz_bias_multi, get_new_xyz_single
 from gaussian.loss_utils import l1_loss, ssim_loss
+from gaussian.mapping_budget import select_new_gaussian_budget
 
 
 class GaussianModel(GaussianBase):
@@ -133,8 +134,33 @@ class GaussianModel(GaussianBase):
             pred_accum[rgb_error > 0.1] = 0.0
 
         # Get point cloud and concat it to GaussianModel.
-        new_added_pc, new_added_pc_color, unnorm_rots = get_pointcloud(self.tfer, new_added_c2w, new_added_color.permute(2, 0, 1), new_added_depth.permute(2, 0, 1), pred_accum, 40000) # 30000
+        mapping_budget_cfg = self.cfg.get("mapping_budget", {})
+        accum_threshold = float(mapping_budget_cfg.get("accum_threshold", self.cfg["adc_args"]["accum_thresh"]))
+        uncovered_ratio = float((pred_accum < accum_threshold).float().mean().item())
+        gaussian_count_before = int(self._xyz.shape[0])
+        new_gaussian_budget = select_new_gaussian_budget(
+            self.cfg,
+            current_gaussians=gaussian_count_before,
+            uncovered_ratio=uncovered_ratio,
+        )
+        new_added_pc, new_added_pc_color, unnorm_rots = get_pointcloud(
+            self.tfer,
+            new_added_c2w,
+            new_added_color.permute(2, 0, 1),
+            new_added_depth.permute(2, 0, 1),
+            pred_accum,
+            new_gaussian_budget,
+        )
         num_pts = new_added_pc.shape[0]
+        if mapping_budget_cfg.get("log", True):
+            print(
+                "[mapping_budget] "
+                f"gaussians_before={gaussian_count_before} "
+                f"uncovered_ratio={uncovered_ratio:.4f} "
+                f"requested={new_gaussian_budget} "
+                f"added={num_pts} "
+                f"gaussians_after={gaussian_count_before + num_pts}"
+            )
 
         dist2 = torch.clamp_min(distCUDA2(new_added_pc), 0.0000001)
         log_scales = torch.log(1.0 * torch.sqrt(dist2))[..., None].repeat(1, 2)

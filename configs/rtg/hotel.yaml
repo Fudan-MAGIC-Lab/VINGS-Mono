@@ -64,6 +64,14 @@ frontend:
 
 adc_args:
   accum_thresh: 0.98
+mapping_budget:
+  enabled: False
+  fixed_new_gaussians: 40000
+  accum_threshold: 0.98
+  gaussian_thresholds: [150000, 300000, 600000]
+  new_gaussian_budgets: [40000, 25000, 12000, 6000]
+  min_new_gaussians: 2000
+  log: True
 training_args:
   num_keyframe: 8
   iters: 50

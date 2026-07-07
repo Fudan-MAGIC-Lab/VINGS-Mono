@@ -30,6 +30,7 @@ parser.add_argument("--lightglue-weight-dir", default=None, help="Override loope
 parser.add_argument("--training-iters", type=int, default=None, help="Override training_args.iters to reduce mapper workload")
 parser.add_argument("--loop-onnx-provider", choices=["cpu", "cuda"], default=None, help="Override loop ONNX Runtime provider")
 parser.add_argument("--adaptive-runtime", action="store_true", help="Enable adaptive runtime budgeting for vis, loop, and mapper")
+parser.add_argument("--enable-mapping-budget", action="store_true", help="Enable adaptive Gaussian addition budgeting in mapper")
 parser.add_argument("--no-vis", action="store_true", help="Force headless execution by disabling visualization")
 parser.add_argument("--disable-loop", action="store_true", help="Disable loop closure to bypass optional loop dependencies")
 parser.add_argument("--disable-metric", action="store_true", help="Disable metric depth inference")
@@ -52,6 +53,7 @@ def apply_overrides(cfg):
     cfg.setdefault('device', {})
     cfg.setdefault('looper', {})
     cfg.setdefault('runtime_budget', {})
+    cfg.setdefault('mapping_budget', {})
 
     if args.dataset_root is not None:
         cfg['dataset']['root'] = args.dataset_root
@@ -80,6 +82,8 @@ def apply_overrides(cfg):
         cfg['looper']['onnx_provider'] = args.loop_onnx_provider
     if args.adaptive_runtime:
         cfg['runtime_budget']['enabled'] = True
+    if args.enable_mapping_budget:
+        cfg['mapping_budget']['enabled'] = True
     if args.no_vis:
         cfg['use_vis'] = False
     if args.disable_loop:
