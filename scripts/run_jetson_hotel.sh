@@ -22,6 +22,7 @@ training_iters="${VINGS_TRAINING_ITERS:-30}"
 adaptive_runtime="${VINGS_ADAPTIVE_RUNTIME:-1}"
 mapping_budget="${VINGS_MAPPING_BUDGET:-0}"
 pruning_budget="${VINGS_PRUNING_BUDGET:-0}"
+pixel_budget="${VINGS_PIXEL_BUDGET:-0}"
 tracker_device="${VINGS_TRACKER_DEVICE:-cuda:0}"
 mapper_device="${VINGS_MAPPER_DEVICE:-cuda:0}"
 
@@ -38,6 +39,11 @@ fi
 pruning_budget_args=()
 if [ "$pruning_budget" != "0" ]; then
   pruning_budget_args+=(--enable-jetson-pruning)
+fi
+
+pixel_budget_args=()
+if [ "$pixel_budget" != "0" ]; then
+  pixel_budget_args+=(--enable-pixel-budget)
 fi
 
 if [ ! -d "$dataset_root/nosky_color" ]; then
@@ -75,5 +81,6 @@ python scripts/run.py \
   "${adaptive_runtime_args[@]}" \
   "${mapping_budget_args[@]}" \
   "${pruning_budget_args[@]}" \
+  "${pixel_budget_args[@]}" \
   --device-tracker "$tracker_device" \
   --device-mapper "$mapper_device"

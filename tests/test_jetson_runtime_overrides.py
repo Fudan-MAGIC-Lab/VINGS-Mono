@@ -183,6 +183,29 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
 
         self.assertTrue(updated["pruning_budget"]["enabled"])
 
+    def test_run_py_can_enable_pixel_budget(self):
+        globals_dict = _load_run_globals(
+            [
+                "run.py",
+                "dummy.yaml",
+                "--enable-pixel-budget",
+            ]
+        )
+
+        cfg = {
+            "dataset": {},
+            "output": {},
+            "frontend": {},
+            "device": {},
+            "looper": {},
+            "pixel_budget": {"enabled": False},
+            "training_args": {"iters": 30},
+        }
+
+        updated = globals_dict["apply_overrides"](cfg)
+
+        self.assertTrue(updated["pixel_budget"]["enabled"])
+
     def test_metric_model_exposes_repo_root_locator(self):
         globals_dict = _load_metric_globals()
 

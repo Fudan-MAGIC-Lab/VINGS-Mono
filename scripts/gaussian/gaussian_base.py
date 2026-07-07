@@ -12,6 +12,7 @@ from gaussian.gaussian_utils import distCUDA2, weighting_grad, get_gaussian_mask
 from gaussian.general_utils import inverse_sigmoid
 from abc import ABCMeta, abstractmethod
 from gaussian.loss_utils import get_loss, get_pixel_mask, l1_loss
+from gaussian.pixel_budget import make_pixel_mask, select_pixel_budget
 from gaussian.normal_utils import depth_propagate_normal
 try:
     from gaussian.vis_utils import vis_rgbdnua, load_ply, calc_psnr
@@ -151,7 +152,7 @@ class GaussianBase:
             new_added_dict['intrinsic'] = processed_dict['intrinsic']
             return True, new_added_dict
 
-    def render_raw(self, w2c, intrinsic_dict, unopt_gaussian_mask = None):
+    def render_raw(self, w2c, intrinsic_dict, unopt_gaussian_mask = None, pixel_mask=None):
         # Copy 2DGS.
         # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
         screenspace_points = torch.zeros_like(self._xyz, dtype=self.dtype, requires_grad=True, device="cuda") + 0
@@ -167,7 +168,10 @@ class GaussianBase:
         # TTD 2024/10/23 
         # We should use a random bias_per_patch for a test?
         # bias_per_patch = torch.zeros((int(camera.height), int(camera.width)), dtype=torch.int32, device="cuda")
-        pixel_mask = torch.ones(int(camera.height) * int(camera.width), dtype=torch.bool).cuda()
+        if pixel_mask is None:
+            pixel_mask = torch.ones(int(camera.height) * int(camera.width), dtype=torch.bool, device=self.device)
+        else:
+            pixel_mask = pixel_mask.reshape(-1).to(device=self.device, dtype=torch.bool)
         
         raster_settings = GaussianRasterizationSettings(
             image_height=int(camera.height),
@@ -236,10 +240,10 @@ class GaussianBase:
         return rets
     
     
-    def render(self, w2c, intrinsic_dict, unopt_gaussian_mask = None, w2c2=None):
+    def render(self, w2c, intrinsic_dict, unopt_gaussian_mask = None, w2c2=None, pixel_mask=None):
         if w2c2 is None:
             w2c2 = w2c
-        rets = self.render_raw(w2c, intrinsic_dict, unopt_gaussian_mask = None)
+        rets = self.render_raw(w2c, intrinsic_dict, unopt_gaussian_mask = None, pixel_mask=pixel_mask)
         # rets = self.render_opticalflow(w2c, w2c2, intrinsic_dict, unopt_gaussian_mask = None)
         return rets
     
@@ -376,7 +380,28 @@ class GaussianBase:
             c2w = poses[curr_id]
             w2c = torch.linalg.inv(c2w)
             
-            pred_dict = self.render(w2c, intrinsic_dict, None, w2c2=torch.linalg.inv(poses[min(curr_id+1, poses.shape[0]-1)]))
+            pixel_budget = select_pixel_budget(self.cfg, int(self._xyz.shape[0]))
+            render_pixel_mask = None
+            force_full_for_vis = self.cfg.get('use_vis', False) and curr_iter == train_iters - 1
+            if pixel_budget['enabled'] and pixel_budget['keep_ratio'] < 1.0 and not force_full_for_vis:
+                render_pixel_mask = make_pixel_mask(
+                    int(intrinsic_dict['H']),
+                    int(intrinsic_dict['W']),
+                    pixel_budget['keep_ratio'],
+                    device=self.device,
+                )
+            if pixel_budget['enabled'] and curr_iter == 0 and self.cfg.get('pixel_budget', {}).get('log', True):
+                kept_pixels = int(intrinsic_dict['H']) * int(intrinsic_dict['W']) if render_pixel_mask is None else int(render_pixel_mask.sum().item())
+                print(
+                    "[pixel_budget] "
+                    f"stage={pixel_budget['stage']} "
+                    f"keep_ratio={pixel_budget['keep_ratio']:.4f} "
+                    f"pixels={kept_pixels}/{int(intrinsic_dict['H']) * int(intrinsic_dict['W'])}"
+                )
+
+            pred_dict = self.render(w2c, intrinsic_dict, None, w2c2=torch.linalg.inv(poses[min(curr_id+1, poses.shape[0]-1)]), pixel_mask=render_pixel_mask)
+            if render_pixel_mask is not None:
+                pred_dict['pixel_mask'] = render_pixel_mask
             gt_dict = {'rgb': images[curr_id].permute(2,0,1), 'depth': depths[curr_id].permute(2,0,1), 'uncert': depths_cov[curr_id].permute(2,0,1), 'c2w': c2w}
             gt_dict['depth_cov'] = depths_cov[curr_id].permute(2,0,1)
             
@@ -541,4 +566,3 @@ class GaussianBase:
         processed_dict_new = self.run_only_mapping(processed_dict, return_vizout)
         
         return processed_dict_new
-

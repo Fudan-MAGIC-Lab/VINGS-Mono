@@ -111,6 +111,9 @@ def get_loss(cfg, pred_dict, gt_dict):
 
     sky_mask = gt_dict['rgb'].sum(axis=0) == 0.0 # (H, W)
     valid_mask = torch.bitwise_and(~sky_mask, gt_dict['depth'].sum(axis=0) > 0.0) # (H, W)
+    pixel_mask = pred_dict.get('pixel_mask')
+    if pixel_mask is not None:
+        valid_mask = torch.bitwise_and(valid_mask, pixel_mask)
 
     ssim_timeidx_weight   = 0.2
     normal_timeidx_weight = 1.0
@@ -120,8 +123,9 @@ def get_loss(cfg, pred_dict, gt_dict):
         Ll1 = l1_loss(pred_dict['rgb'], gt_dict['rgb'], valid_mask)
         rgb_loss = 0.8 * Ll1 + ssim_timeidx_weight * (1.0 - ssim_loss(pred_dict['rgb'], gt_dict['rgb'], valid_mask))
     else:
-        Ll1 = l1_loss(pred_dict['rgb'], gt_dict['sky_rgb'], torch.ones_like(valid_mask))
-        rgb_loss = 0.8 * Ll1 + ssim_timeidx_weight * (1.0 - ssim_loss(pred_dict['rgb'], gt_dict['sky_rgb'], torch.ones_like(valid_mask)))
+        sky_valid_mask = torch.ones_like(valid_mask) if pixel_mask is None else pixel_mask
+        Ll1 = l1_loss(pred_dict['rgb'], gt_dict['sky_rgb'], sky_valid_mask)
+        rgb_loss = 0.8 * Ll1 + ssim_timeidx_weight * (1.0 - ssim_loss(pred_dict['rgb'], gt_dict['sky_rgb'], sky_valid_mask))
     
     rend_normal = pred_dict['normal']
     surf_normal = pred_dict['surf_normal']
