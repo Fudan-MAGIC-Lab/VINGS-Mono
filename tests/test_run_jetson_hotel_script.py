@@ -25,6 +25,8 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('metric_depth_schedule="${VINGS_METRIC_DEPTH_SCHEDULE:-0}"', content)
         self.assertIn('metric_depth_warmup="${VINGS_METRIC_DEPTH_WARMUP:-30}"', content)
         self.assertIn('metric_depth_interval="${VINGS_METRIC_DEPTH_INTERVAL:-5}"', content)
+        self.assertIn('metric_depth_mode="${VINGS_METRIC_DEPTH_MODE:-keyframe}"', content)
+        self.assertIn('metric_depth_keyframe_min_interval="${VINGS_METRIC_DEPTH_KEYFRAME_MIN_INTERVAL:-3}"', content)
         self.assertIn('lightglue_weight_dir="${VINGS_LIGHTGLUE_DIR:-$shared_root/ckpts/lightglue}"', content)
         self.assertIn('--loop-onnx-provider "$loop_onnx_provider"', content)
         self.assertIn('--frontend-image-size "$frontend_image_size"', content)
@@ -37,6 +39,8 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('metric_depth_schedule_args+=(--enable-metric-depth-schedule)', content)
         self.assertIn('metric_depth_schedule_args+=(--metric-depth-warmup "$metric_depth_warmup")', content)
         self.assertIn('metric_depth_schedule_args+=(--metric-depth-interval "$metric_depth_interval")', content)
+        self.assertIn('metric_depth_schedule_args+=(--metric-depth-mode "$metric_depth_mode")', content)
+        self.assertIn('metric_depth_schedule_args+=(--metric-depth-keyframe-min-interval "$metric_depth_keyframe_min_interval")', content)
 
 
 if __name__ == "__main__":

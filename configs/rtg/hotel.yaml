@@ -82,8 +82,10 @@ pruning_budget:
   log: True
 metric_depth_schedule:
   enabled: False
+  mode: keyframe
   warmup_frames: 30
   interval: 5
+  keyframe_min_interval: 3
   log: True
 pixel_budget:
   enabled: False

@@ -36,9 +36,11 @@ parser.add_argument("--enable-mapping-budget", action="store_true", help="Enable
 parser.add_argument("--enable-jetson-pruning", action="store_true", help="Enable Jetson-aware Gaussian pruning scheduling")
 parser.add_argument("--enable-pixel-budget", action="store_true", help="Enable dynamic pixel downsampling during mapper training")
 parser.add_argument("--profile-runtime", action="store_true", help="Write module-level runtime profiling reports")
-parser.add_argument("--enable-metric-depth-schedule", action="store_true", help="Run metric depth on a warmup/interval schedule instead of every frame")
+parser.add_argument("--enable-metric-depth-schedule", action="store_true", help="Run metric depth with interval or keyframe-aware scheduling instead of every frame")
 parser.add_argument("--metric-depth-warmup", type=int, default=None, help="Number of initial frames that always run metric depth when scheduling is enabled")
 parser.add_argument("--metric-depth-interval", type=int, default=None, help="Run metric depth every N frames after warmup when scheduling is enabled")
+parser.add_argument("--metric-depth-mode", choices=["keyframe", "interval"], default=None, help="Metric depth scheduling mode")
+parser.add_argument("--metric-depth-keyframe-min-interval", type=int, default=None, help="Minimum frame gap between metric depth predictions realized by keyframes")
 parser.add_argument("--no-vis", action="store_true", help="Force headless execution by disabling visualization")
 parser.add_argument("--disable-loop", action="store_true", help="Disable loop closure to bypass optional loop dependencies")
 parser.add_argument("--disable-metric", action="store_true", help="Disable metric depth inference")
@@ -109,6 +111,10 @@ def apply_overrides(cfg):
         cfg['metric_depth_schedule']['warmup_frames'] = int(args.metric_depth_warmup)
     if args.metric_depth_interval is not None:
         cfg['metric_depth_schedule']['interval'] = int(args.metric_depth_interval)
+    if args.metric_depth_mode is not None:
+        cfg['metric_depth_schedule']['mode'] = args.metric_depth_mode
+    if args.metric_depth_keyframe_min_interval is not None:
+        cfg['metric_depth_schedule']['keyframe_min_interval'] = int(args.metric_depth_keyframe_min_interval)
     if args.no_vis:
         cfg['use_vis'] = False
     if args.disable_loop:
@@ -252,6 +258,11 @@ class Runner:
                     if metric_decision["should_predict"]:
                         with self.profiler.time("metric_depth", idx):
                             data_packet['depth'] = self.metric_predictor.predict(data_packet['rgb'][0])
+                    elif metric_decision["reason"] == "keyframe_lazy":
+                        def predict_metric_depth():
+                            with self.profiler.time("metric_depth", idx):
+                                return self.metric_predictor.predict(data_packet['rgb'][0])
+                        data_packet['depth'] = self.metric_depth_scheduler.make_lazy_depth_provider(predict_metric_depth, frame_idx=idx)
                     elif metric_decision["reason"] == "scheduled_skip":
                         data_packet.pop('depth', None)
 

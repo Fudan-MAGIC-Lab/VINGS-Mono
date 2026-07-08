@@ -1,37 +1,85 @@
+class LazyMetricDepth:
+    def __init__(self, resolve_fn):
+        self._resolve_fn = resolve_fn
+        self._resolved = False
+        self._value = None
+
+    def __call__(self):
+        if not self._resolved:
+            self._value = self._resolve_fn()
+            self._resolved = True
+        return self._value
+
+
 class MetricDepthScheduler:
     def __init__(self, cfg):
         schedule_cfg = cfg.get("metric_depth_schedule", {})
         self.enabled = bool(schedule_cfg.get("enabled", False))
+        self.mode = str(schedule_cfg.get("mode", "keyframe"))
         self.warmup_frames = max(0, int(schedule_cfg.get("warmup_frames", 30)))
         self.interval = max(1, int(schedule_cfg.get("interval", 5)))
+        self.keyframe_min_interval = max(1, int(schedule_cfg.get("keyframe_min_interval", 3)))
         self.log = bool(schedule_cfg.get("log", True))
         self.predicted = 0
         self.skipped = 0
+        self.lazy_requested = 0
+        self.lazy_realized = 0
+        self.lazy_suppressed = 0
+        self._last_keyframe_depth_frame = None
 
     def decide(self, frame_idx, has_depth):
         if has_depth:
             return {"should_predict": False, "reason": "already_has_depth"}
         if not self.enabled:
             return {"should_predict": True, "reason": "disabled"}
+        if self.mode == "keyframe":
+            return {"should_predict": False, "reason": "keyframe_lazy"}
         if int(frame_idx) < self.warmup_frames:
             return {"should_predict": True, "reason": "warmup"}
         if (int(frame_idx) - self.warmup_frames) % self.interval == 0:
             return {"should_predict": True, "reason": "interval"}
         return {"should_predict": False, "reason": "scheduled_skip"}
 
+    def make_lazy_depth_provider(self, predict_fn, frame_idx=None):
+        return LazyMetricDepth(lambda: self._resolve_lazy_depth(predict_fn, frame_idx))
+
+    def _resolve_lazy_depth(self, predict_fn, frame_idx):
+        self.lazy_realized += 1
+        if not self._keyframe_budget_allows(frame_idx):
+            self.lazy_suppressed += 1
+            self.skipped += 1
+            return None
+        depth = predict_fn()
+        self.predicted += 1
+        if frame_idx is not None:
+            self._last_keyframe_depth_frame = int(frame_idx)
+        return depth
+
+    def _keyframe_budget_allows(self, frame_idx):
+        if frame_idx is None or self._last_keyframe_depth_frame is None:
+            return True
+        return int(frame_idx) - self._last_keyframe_depth_frame >= self.keyframe_min_interval
+
     def record(self, decision):
         if decision["should_predict"]:
             self.predicted += 1
         elif decision["reason"] == "scheduled_skip":
             self.skipped += 1
+        elif decision["reason"] == "keyframe_lazy":
+            self.lazy_requested += 1
 
     def summary(self):
         return {
             "enabled": self.enabled,
+            "mode": self.mode,
             "warmup_frames": self.warmup_frames,
             "interval": self.interval,
+            "keyframe_min_interval": self.keyframe_min_interval,
             "predicted": self.predicted,
             "skipped": self.skipped,
+            "lazy_requested": self.lazy_requested,
+            "lazy_realized": self.lazy_realized,
+            "lazy_suppressed": self.lazy_suppressed,
         }
 
     def maybe_log_summary(self):
@@ -40,7 +88,11 @@ class MetricDepthScheduler:
         summary = self.summary()
         print(
             "[metric_depth_schedule] "
-            f"enabled=1 warmup={summary['warmup_frames']} "
+            f"enabled=1 mode={summary['mode']} "
+            f"warmup={summary['warmup_frames']} "
             f"interval={summary['interval']} "
-            f"predicted={summary['predicted']} skipped={summary['skipped']}"
+            f"keyframe_min_interval={summary['keyframe_min_interval']} "
+            f"predicted={summary['predicted']} skipped={summary['skipped']} "
+            f"lazy_requested={summary['lazy_requested']} lazy_realized={summary['lazy_realized']} "
+            f"lazy_suppressed={summary['lazy_suppressed']}"
         )
