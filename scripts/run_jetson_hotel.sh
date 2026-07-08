@@ -31,7 +31,7 @@ metric_depth_mode="${VINGS_METRIC_DEPTH_MODE:-keyframe}"
 metric_depth_keyframe_min_interval="${VINGS_METRIC_DEPTH_KEYFRAME_MIN_INTERVAL:-3}"
 metric_depth_keyframe_force_interval="${VINGS_METRIC_DEPTH_KEYFRAME_FORCE_INTERVAL:-10}"
 metric_depth_high_motion_ratio="${VINGS_METRIC_DEPTH_HIGH_MOTION_RATIO:-3.0}"
-metric_depth_scale="${VINGS_METRIC_DEPTH_SCALE:-1.0}"
+metric_depth_scale="${VINGS_METRIC_DEPTH_SCALE:-0.75}"
 tracker_device="${VINGS_TRACKER_DEVICE:-cuda:0}"
 mapper_device="${VINGS_MAPPER_DEVICE:-cuda:0}"
 
