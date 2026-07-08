@@ -229,6 +229,35 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
 
         self.assertTrue(updated["profiling"]["runtime"]["enabled"])
 
+    def test_run_py_can_enable_metric_depth_schedule(self):
+        globals_dict = _load_run_globals(
+            [
+                "run.py",
+                "dummy.yaml",
+                "--enable-metric-depth-schedule",
+                "--metric-depth-warmup",
+                "12",
+                "--metric-depth-interval",
+                "4",
+            ]
+        )
+
+        cfg = {
+            "dataset": {},
+            "output": {},
+            "frontend": {},
+            "device": {},
+            "looper": {},
+            "metric_depth_schedule": {"enabled": False},
+            "training_args": {"iters": 30},
+        }
+
+        updated = globals_dict["apply_overrides"](cfg)
+
+        self.assertTrue(updated["metric_depth_schedule"]["enabled"])
+        self.assertEqual(updated["metric_depth_schedule"]["warmup_frames"], 12)
+        self.assertEqual(updated["metric_depth_schedule"]["interval"], 4)
+
     def test_metric_model_exposes_repo_root_locator(self):
         globals_dict = _load_metric_globals()
 

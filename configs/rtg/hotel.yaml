@@ -80,6 +80,11 @@ pruning_budget:
   high_thresholds: [0.8, 0.75, 0.7, 0.65]
   max_prune_ratios: [0.05, 0.08, 0.12, 0.16]
   log: True
+metric_depth_schedule:
+  enabled: False
+  warmup_frames: 30
+  interval: 5
+  log: True
 pixel_budget:
   enabled: False
   gaussian_thresholds: [150000, 300000, 600000]

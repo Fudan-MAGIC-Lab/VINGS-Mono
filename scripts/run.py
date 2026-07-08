@@ -15,6 +15,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 from runtime_budget import RuntimeBudgetController
 from profiling.runtime_profiler import RuntimeProfiler
+from metric_depth_schedule import MetricDepthScheduler
 
 
 parser = argparse.ArgumentParser(description="Add config path.")
@@ -35,6 +36,9 @@ parser.add_argument("--enable-mapping-budget", action="store_true", help="Enable
 parser.add_argument("--enable-jetson-pruning", action="store_true", help="Enable Jetson-aware Gaussian pruning scheduling")
 parser.add_argument("--enable-pixel-budget", action="store_true", help="Enable dynamic pixel downsampling during mapper training")
 parser.add_argument("--profile-runtime", action="store_true", help="Write module-level runtime profiling reports")
+parser.add_argument("--enable-metric-depth-schedule", action="store_true", help="Run metric depth on a warmup/interval schedule instead of every frame")
+parser.add_argument("--metric-depth-warmup", type=int, default=None, help="Number of initial frames that always run metric depth when scheduling is enabled")
+parser.add_argument("--metric-depth-interval", type=int, default=None, help="Run metric depth every N frames after warmup when scheduling is enabled")
 parser.add_argument("--no-vis", action="store_true", help="Force headless execution by disabling visualization")
 parser.add_argument("--disable-loop", action="store_true", help="Disable loop closure to bypass optional loop dependencies")
 parser.add_argument("--disable-metric", action="store_true", help="Disable metric depth inference")
@@ -62,6 +66,7 @@ def apply_overrides(cfg):
     cfg.setdefault('pixel_budget', {})
     cfg.setdefault('profiling', {})
     cfg['profiling'].setdefault('runtime', {})
+    cfg.setdefault('metric_depth_schedule', {})
 
     if args.dataset_root is not None:
         cfg['dataset']['root'] = args.dataset_root
@@ -98,6 +103,12 @@ def apply_overrides(cfg):
         cfg['pixel_budget']['enabled'] = True
     if args.profile_runtime:
         cfg['profiling']['runtime']['enabled'] = True
+    if args.enable_metric_depth_schedule:
+        cfg['metric_depth_schedule']['enabled'] = True
+    if args.metric_depth_warmup is not None:
+        cfg['metric_depth_schedule']['warmup_frames'] = int(args.metric_depth_warmup)
+    if args.metric_depth_interval is not None:
+        cfg['metric_depth_schedule']['interval'] = int(args.metric_depth_interval)
     if args.no_vis:
         cfg['use_vis'] = False
     if args.disable_loop:
@@ -185,6 +196,7 @@ class Runner:
         self.runtime_budget = RuntimeBudgetController(cfg, dataset_length=len(self.dataset))
         self._last_runtime_budget_stage = None
         self.profiler = RuntimeProfiler.from_config(cfg, sync_callback=sync_cuda_if_available)
+        self.metric_depth_scheduler = MetricDepthScheduler(cfg)
 
     def _get_gaussian_count(self):
         xyz = getattr(self.mapper, "_xyz", None)
@@ -234,9 +246,14 @@ class Runner:
                         self.tracker.frontend.all_stamp = self.dataset.preload_camtimestamp()
 
                 if 'use_metric' in self.cfg.keys() and self.cfg['use_metric']:
-                    if 'depth' not in data_packet.keys() or data_packet['depth'] is None:
+                    has_depth = 'depth' in data_packet.keys() and data_packet['depth'] is not None
+                    metric_decision = self.metric_depth_scheduler.decide(idx, has_depth)
+                    self.metric_depth_scheduler.record(metric_decision)
+                    if metric_decision["should_predict"]:
                         with self.profiler.time("metric_depth", idx):
                             data_packet['depth'] = self.metric_predictor.predict(data_packet['rgb'][0])
+                    elif metric_decision["reason"] == "scheduled_skip":
+                        data_packet.pop('depth', None)
 
                 with self.profiler.time("preload_imu_stamp", idx):
                     self.tracker.frontend.all_imu   = self.dataset.preload_imu()
@@ -294,6 +311,7 @@ class Runner:
                         self.save_ply_fn(self.mapper, idx, save_mode='2dgs')
                     # save_ply(self.mapper, idx, save_mode='pth')
 
+        self.metric_depth_scheduler.maybe_log_summary()
         self.profiler.write_reports()
             
 
