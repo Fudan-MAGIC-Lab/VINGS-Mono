@@ -29,6 +29,8 @@ metric_depth_warmup="${VINGS_METRIC_DEPTH_WARMUP:-30}"
 metric_depth_interval="${VINGS_METRIC_DEPTH_INTERVAL:-5}"
 metric_depth_mode="${VINGS_METRIC_DEPTH_MODE:-keyframe}"
 metric_depth_keyframe_min_interval="${VINGS_METRIC_DEPTH_KEYFRAME_MIN_INTERVAL:-3}"
+metric_depth_keyframe_force_interval="${VINGS_METRIC_DEPTH_KEYFRAME_FORCE_INTERVAL:-10}"
+metric_depth_high_motion_ratio="${VINGS_METRIC_DEPTH_HIGH_MOTION_RATIO:-3.0}"
 tracker_device="${VINGS_TRACKER_DEVICE:-cuda:0}"
 mapper_device="${VINGS_MAPPER_DEVICE:-cuda:0}"
 
@@ -64,6 +66,8 @@ if [ "$metric_depth_schedule" != "0" ]; then
   metric_depth_schedule_args+=(--metric-depth-interval "$metric_depth_interval")
   metric_depth_schedule_args+=(--metric-depth-mode "$metric_depth_mode")
   metric_depth_schedule_args+=(--metric-depth-keyframe-min-interval "$metric_depth_keyframe_min_interval")
+  metric_depth_schedule_args+=(--metric-depth-keyframe-force-interval "$metric_depth_keyframe_force_interval")
+  metric_depth_schedule_args+=(--metric-depth-high-motion-ratio "$metric_depth_high_motion_ratio")
 fi
 
 if [ ! -d "$dataset_root/nosky_color" ]; then

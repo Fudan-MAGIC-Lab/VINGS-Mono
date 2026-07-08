@@ -9,8 +9,13 @@ import frontend.geom.projective_ops as pops
 from frontend.modules.corr import CorrBlock
 import numpy as np
 
-def _resolve_lazy_depth(depth):
-    return depth() if callable(depth) else depth
+def _resolve_lazy_depth(depth, **context):
+    if not callable(depth):
+        return depth
+    try:
+        return depth(**context)
+    except TypeError:
+        return depth()
 
 
 class MotionFilter:
@@ -88,11 +93,16 @@ class MotionFilter:
             _, delta, weight = self.update(self.net[None], self.inp[None], corr)
 
             # check motion magnitue / add new frame to video
-            if delta.norm(dim=-1).mean().item() > self.thresh:
+            motion_score = delta.norm(dim=-1).mean().item()
+            if motion_score > self.thresh:
                 self.count = 0
                 net, inp = self.__context_encoder(inputs[:,[0]]) 
                 self.net, self.inp, self.fmap = net, inp, gmap 
-                self.video.append(tstamp, image[0], None, None, _resolve_lazy_depth(depth), intrinsics / 8.0, gmap, net[0], inp[0])
+                self.video.append(
+                    tstamp, image[0], None, None,
+                    _resolve_lazy_depth(depth, motion_score=motion_score, motion_threshold=self.thresh),
+                    intrinsics / 8.0, gmap, net[0], inp[0]
+                )
             else:
                 self.count += 1
 

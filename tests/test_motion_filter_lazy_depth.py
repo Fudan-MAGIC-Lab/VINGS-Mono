@@ -86,6 +86,19 @@ class MotionFilterLazyDepthTests(unittest.TestCase):
         self.assertEqual(calls, ["predict"])
         self.assertEqual(filt.video.appended_depths, ["depth"])
 
+    def test_motion_append_passes_motion_context_to_lazy_depth(self):
+        contexts = []
+        filt = self.make_filter(counter_value=1, motion_value=6.0)
+
+        def depth_provider(**context):
+            contexts.append(context)
+            return "depth"
+
+        self.run_track(filt, depth_provider)
+
+        self.assertEqual(filt.video.appended_depths, ["depth"])
+        self.assertEqual(contexts, [{"motion_score": 6.0, "motion_threshold": 2.5}])
+
     def test_non_keyframe_does_not_realize_lazy_depth(self):
         calls = []
         filt = self.make_filter(counter_value=1, motion_value=1.0)

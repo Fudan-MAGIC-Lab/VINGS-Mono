@@ -41,6 +41,8 @@ parser.add_argument("--metric-depth-warmup", type=int, default=None, help="Numbe
 parser.add_argument("--metric-depth-interval", type=int, default=None, help="Run metric depth every N frames after warmup when scheduling is enabled")
 parser.add_argument("--metric-depth-mode", choices=["keyframe", "interval"], default=None, help="Metric depth scheduling mode")
 parser.add_argument("--metric-depth-keyframe-min-interval", type=int, default=None, help="Minimum frame gap between metric depth predictions realized by keyframes")
+parser.add_argument("--metric-depth-keyframe-force-interval", type=int, default=None, help="Force a metric depth prediction after this many keyframe frames without depth")
+parser.add_argument("--metric-depth-high-motion-ratio", type=float, default=None, help="Predict metric depth early when keyframe motion exceeds this multiple of the frontend threshold")
 parser.add_argument("--no-vis", action="store_true", help="Force headless execution by disabling visualization")
 parser.add_argument("--disable-loop", action="store_true", help="Disable loop closure to bypass optional loop dependencies")
 parser.add_argument("--disable-metric", action="store_true", help="Disable metric depth inference")
@@ -115,6 +117,10 @@ def apply_overrides(cfg):
         cfg['metric_depth_schedule']['mode'] = args.metric_depth_mode
     if args.metric_depth_keyframe_min_interval is not None:
         cfg['metric_depth_schedule']['keyframe_min_interval'] = int(args.metric_depth_keyframe_min_interval)
+    if args.metric_depth_keyframe_force_interval is not None:
+        cfg['metric_depth_schedule']['keyframe_force_interval'] = int(args.metric_depth_keyframe_force_interval)
+    if args.metric_depth_high_motion_ratio is not None:
+        cfg['metric_depth_schedule']['high_motion_ratio'] = float(args.metric_depth_high_motion_ratio)
     if args.no_vis:
         cfg['use_vis'] = False
     if args.disable_loop:

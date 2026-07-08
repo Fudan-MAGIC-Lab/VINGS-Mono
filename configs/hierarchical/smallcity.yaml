@@ -86,6 +86,8 @@ metric_depth_schedule:
   warmup_frames: 30
   interval: 5
   keyframe_min_interval: 3
+  keyframe_force_interval: 10
+  high_motion_ratio: 3.0
   log: True
 pixel_budget:
   enabled: False

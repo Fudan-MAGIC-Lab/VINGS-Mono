@@ -243,6 +243,10 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
                 "keyframe",
                 "--metric-depth-keyframe-min-interval",
                 "3",
+                "--metric-depth-keyframe-force-interval",
+                "10",
+                "--metric-depth-high-motion-ratio",
+                "2.0",
             ]
         )
 
@@ -263,6 +267,8 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
         self.assertEqual(updated["metric_depth_schedule"]["interval"], 4)
         self.assertEqual(updated["metric_depth_schedule"]["mode"], "keyframe")
         self.assertEqual(updated["metric_depth_schedule"]["keyframe_min_interval"], 3)
+        self.assertEqual(updated["metric_depth_schedule"]["keyframe_force_interval"], 10)
+        self.assertEqual(updated["metric_depth_schedule"]["high_motion_ratio"], 2.0)
 
     def test_metric_model_exposes_repo_root_locator(self):
         globals_dict = _load_metric_globals()
