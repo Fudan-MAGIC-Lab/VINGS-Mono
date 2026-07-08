@@ -21,6 +21,7 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('mapping_budget="${VINGS_MAPPING_BUDGET:-0}"', content)
         self.assertIn('pruning_budget="${VINGS_PRUNING_BUDGET:-0}"', content)
         self.assertIn('pixel_budget="${VINGS_PIXEL_BUDGET:-0}"', content)
+        self.assertIn('profile_runtime="${VINGS_PROFILE_RUNTIME:-0}"', content)
         self.assertIn('lightglue_weight_dir="${VINGS_LIGHTGLUE_DIR:-$shared_root/ckpts/lightglue}"', content)
         self.assertIn('--loop-onnx-provider "$loop_onnx_provider"', content)
         self.assertIn('--frontend-image-size "$frontend_image_size"', content)
@@ -29,6 +30,7 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('mapping_budget_args+=(--enable-mapping-budget)', content)
         self.assertIn('pruning_budget_args+=(--enable-jetson-pruning)', content)
         self.assertIn('pixel_budget_args+=(--enable-pixel-budget)', content)
+        self.assertIn('profile_runtime_args+=(--profile-runtime)', content)
 
 
 if __name__ == "__main__":

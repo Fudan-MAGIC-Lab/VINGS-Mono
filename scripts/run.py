@@ -14,6 +14,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 from runtime_budget import RuntimeBudgetController
+from profiling.runtime_profiler import RuntimeProfiler
 
 
 parser = argparse.ArgumentParser(description="Add config path.")
@@ -33,6 +34,7 @@ parser.add_argument("--adaptive-runtime", action="store_true", help="Enable adap
 parser.add_argument("--enable-mapping-budget", action="store_true", help="Enable adaptive Gaussian addition budgeting in mapper")
 parser.add_argument("--enable-jetson-pruning", action="store_true", help="Enable Jetson-aware Gaussian pruning scheduling")
 parser.add_argument("--enable-pixel-budget", action="store_true", help="Enable dynamic pixel downsampling during mapper training")
+parser.add_argument("--profile-runtime", action="store_true", help="Write module-level runtime profiling reports")
 parser.add_argument("--no-vis", action="store_true", help="Force headless execution by disabling visualization")
 parser.add_argument("--disable-loop", action="store_true", help="Disable loop closure to bypass optional loop dependencies")
 parser.add_argument("--disable-metric", action="store_true", help="Disable metric depth inference")
@@ -58,6 +60,8 @@ def apply_overrides(cfg):
     cfg.setdefault('mapping_budget', {})
     cfg.setdefault('pruning_budget', {})
     cfg.setdefault('pixel_budget', {})
+    cfg.setdefault('profiling', {})
+    cfg['profiling'].setdefault('runtime', {})
 
     if args.dataset_root is not None:
         cfg['dataset']['root'] = args.dataset_root
@@ -92,6 +96,8 @@ def apply_overrides(cfg):
         cfg['pruning_budget']['enabled'] = True
     if args.enable_pixel_budget:
         cfg['pixel_budget']['enabled'] = True
+    if args.profile_runtime:
+        cfg['profiling']['runtime']['enabled'] = True
     if args.no_vis:
         cfg['use_vis'] = False
     if args.disable_loop:
@@ -106,6 +112,11 @@ def apply_overrides(cfg):
 def load_vis_utils():
     from gaussian.vis_utils import save_ply, vis_map, vis_bev
     return save_ply, vis_map, vis_bev
+
+
+def sync_cuda_if_available():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 
 class Runner:
@@ -173,6 +184,7 @@ class Runner:
 
         self.runtime_budget = RuntimeBudgetController(cfg, dataset_length=len(self.dataset))
         self._last_runtime_budget_stage = None
+        self.profiler = RuntimeProfiler.from_config(cfg, sync_callback=sync_cuda_if_available)
 
     def _get_gaussian_count(self):
         xyz = getattr(self.mapper, "_xyz", None)
@@ -212,62 +224,77 @@ class Runner:
         
         # Run Tracking.
         for idx in tqdm(range(len(self.dataset))):
-            
-            data_packet = self.dataset[idx]
-            
-            if 'use_mobile' in self.cfg.keys() and self.cfg['use_mobile']:
-                self.tracker.frontend.all_imu   = self.dataset.preload_imu()
-                self.tracker.frontend.all_stamp = self.dataset.preload_camtimestamp()
-            
-            if 'use_metric' in self.cfg.keys() and self.cfg['use_metric']:
-                if 'depth' not in data_packet.keys() or data_packet['depth'] is None:
-                    data_packet['depth'] = self.metric_predictor.predict(data_packet['rgb'][0])
-            
-            self.tracker.frontend.all_imu   = self.dataset.preload_imu()
-            self.tracker.frontend.all_stamp = self.dataset.preload_camtimestamp()
-            
-            # torch.set_grad_enabled(False)
-            self.tracker.track(data_packet if not self.cfg['mode']=='vo_nerfslam' else datapacket_to_nerfslam(data_packet, idx))
-            # torch.set_grad_enabled(True)
-            
-            torch.cuda.empty_cache()
-            # Judge whether new keyframe is added and package keyframe dict.
-            viz_out = judge_and_package(self.tracker, data_packet['intrinsic'])
-            
-            if viz_out is not None and (self.cfg['mode'] in ['vo', 'vo_nerfslam'] or self.tracker.video.imu_enabled):
-                keyframe_id = int(viz_out["global_kf_id"][-1])
-                gaussian_count = self._get_gaussian_count()
-                runtime_budget = self.runtime_budget.evaluate(
-                    frame_idx=idx,
-                    keyframe_id=keyframe_id,
-                    gaussian_count=gaussian_count,
-                )
-                self._log_runtime_budget(runtime_budget, idx, keyframe_id, gaussian_count)
-                self._sync_mapper_iters(runtime_budget["mapper_iters"])
+            with self.profiler.time("frame_total", idx):
+                with self.profiler.time("dataset_load", idx):
+                    data_packet = self.dataset[idx]
 
-                # Save and check.
-                new_viz_out = self.mapper.run(viz_out, True)
-                
-                if self.use_loop:
-                    if runtime_budget["should_run_loop"]:
-                        self.looper.run(self.mapper, self.tracker, viz_out, idx)
+                if 'use_mobile' in self.cfg.keys() and self.cfg['use_mobile']:
+                    with self.profiler.time("mobile_preload_imu_stamp", idx):
+                        self.tracker.frontend.all_imu   = self.dataset.preload_imu()
+                        self.tracker.frontend.all_stamp = self.dataset.preload_camtimestamp()
 
-                if self.use_storage_manager and (idx+1) % 10 == 0:
-                    self.storage_manager.run(self.tracker, self.mapper, viz_out)
+                if 'use_metric' in self.cfg.keys() and self.cfg['use_metric']:
+                    if 'depth' not in data_packet.keys() or data_packet['depth'] is None:
+                        with self.profiler.time("metric_depth", idx):
+                            data_packet['depth'] = self.metric_predictor.predict(data_packet['rgb'][0])
+
+                with self.profiler.time("preload_imu_stamp", idx):
+                    self.tracker.frontend.all_imu   = self.dataset.preload_imu()
+                    self.tracker.frontend.all_stamp = self.dataset.preload_camtimestamp()
+
+                # torch.set_grad_enabled(False)
+                with self.profiler.time("tracking", idx):
+                    self.tracker.track(data_packet if not self.cfg['mode']=='vo_nerfslam' else datapacket_to_nerfslam(data_packet, idx))
+                # torch.set_grad_enabled(True)
+
+                with self.profiler.time("cache_cleanup", idx):
                     torch.cuda.empty_cache()
-                
-                if self.cfg['use_vis'] and runtime_budget["should_run_vis"]:
-                    if not self.cfg['use_storage_manager'] or self.storage_manager._xyz.shape[0]==0:
-                        self.vis_map_fn(self.tracker, self.mapper)
-                        self.vis_bev_fn(self.tracker, self.mapper)
-                    else:
-                        self.storage_manager.vis_map_storage(self.tracker, self.mapper)    
-                        self.storage_manager.vis_bev_storage(self.tracker, self.mapper)    
-            
-            if (idx == len(self.dataset) - 1) and self.mapper._xyz.shape[0] > 0 and (not self.skip_save_ply):
-            # if ((idx+1) % 100 == 0 or (idx == len(self.dataset) - 1)) and self.mapper._xyz.shape[0] > 0:
-                self.save_ply_fn(self.mapper, idx, save_mode='2dgs')
-                # save_ply(self.mapper, idx, save_mode='pth')
+                # Judge whether new keyframe is added and package keyframe dict.
+                with self.profiler.time("package_keyframe", idx):
+                    viz_out = judge_and_package(self.tracker, data_packet['intrinsic'])
+
+                if viz_out is not None and (self.cfg['mode'] in ['vo', 'vo_nerfslam'] or self.tracker.video.imu_enabled):
+                    keyframe_id = int(viz_out["global_kf_id"][-1])
+                    gaussian_count = self._get_gaussian_count()
+                    with self.profiler.time("runtime_budget", idx):
+                        runtime_budget = self.runtime_budget.evaluate(
+                            frame_idx=idx,
+                            keyframe_id=keyframe_id,
+                            gaussian_count=gaussian_count,
+                        )
+                        self._log_runtime_budget(runtime_budget, idx, keyframe_id, gaussian_count)
+                        self._sync_mapper_iters(runtime_budget["mapper_iters"])
+
+                    # Save and check.
+                    with self.profiler.time("mapping", idx):
+                        new_viz_out = self.mapper.run(viz_out, True)
+
+                    if self.use_loop:
+                        if runtime_budget["should_run_loop"]:
+                            with self.profiler.time("loop", idx):
+                                self.looper.run(self.mapper, self.tracker, viz_out, idx)
+
+                    if self.use_storage_manager and (idx+1) % 10 == 0:
+                        with self.profiler.time("storage", idx):
+                            self.storage_manager.run(self.tracker, self.mapper, viz_out)
+                            torch.cuda.empty_cache()
+
+                    if self.cfg['use_vis'] and runtime_budget["should_run_vis"]:
+                        with self.profiler.time("visualization", idx):
+                            if not self.cfg['use_storage_manager'] or self.storage_manager._xyz.shape[0]==0:
+                                self.vis_map_fn(self.tracker, self.mapper)
+                                self.vis_bev_fn(self.tracker, self.mapper)
+                            else:
+                                self.storage_manager.vis_map_storage(self.tracker, self.mapper)
+                                self.storage_manager.vis_bev_storage(self.tracker, self.mapper)
+
+                if (idx == len(self.dataset) - 1) and self.mapper._xyz.shape[0] > 0 and (not self.skip_save_ply):
+                # if ((idx+1) % 100 == 0 or (idx == len(self.dataset) - 1)) and self.mapper._xyz.shape[0] > 0:
+                    with self.profiler.time("save_ply", idx):
+                        self.save_ply_fn(self.mapper, idx, save_mode='2dgs')
+                    # save_ply(self.mapper, idx, save_mode='pth')
+
+        self.profiler.write_reports()
             
 
 if __name__ == '__main__':

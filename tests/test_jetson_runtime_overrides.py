@@ -206,6 +206,29 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
 
         self.assertTrue(updated["pixel_budget"]["enabled"])
 
+    def test_run_py_can_enable_runtime_profiling(self):
+        globals_dict = _load_run_globals(
+            [
+                "run.py",
+                "dummy.yaml",
+                "--profile-runtime",
+            ]
+        )
+
+        cfg = {
+            "dataset": {},
+            "output": {},
+            "frontend": {},
+            "device": {},
+            "looper": {},
+            "profiling": {"runtime": {"enabled": False}},
+            "training_args": {"iters": 30},
+        }
+
+        updated = globals_dict["apply_overrides"](cfg)
+
+        self.assertTrue(updated["profiling"]["runtime"]["enabled"])
+
     def test_metric_model_exposes_repo_root_locator(self):
         globals_dict = _load_metric_globals()
 
