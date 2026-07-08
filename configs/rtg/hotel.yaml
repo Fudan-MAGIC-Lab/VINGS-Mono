@@ -4,6 +4,7 @@ use_dynamic: False
 use_loop: True
 use_pose_refine: False
 use_metric: True
+metric_depth_scale: 1.0
 
 mode: 'vo' # 'vo' or 'vio' or 'vo_nerfslam'
 

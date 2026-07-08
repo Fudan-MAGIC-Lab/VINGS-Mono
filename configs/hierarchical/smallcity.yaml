@@ -3,6 +3,7 @@ use_sky: False
 use_dynamic: False
 use_pose_refine: False
 use_metric: True
+metric_depth_scale: 1.0
 debug_mode: False
 
 mode: 'vo' # 'vo' or 'vio'

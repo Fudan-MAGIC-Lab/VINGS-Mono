@@ -29,6 +29,7 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('metric_depth_keyframe_min_interval="${VINGS_METRIC_DEPTH_KEYFRAME_MIN_INTERVAL:-3}"', content)
         self.assertIn('metric_depth_keyframe_force_interval="${VINGS_METRIC_DEPTH_KEYFRAME_FORCE_INTERVAL:-10}"', content)
         self.assertIn('metric_depth_high_motion_ratio="${VINGS_METRIC_DEPTH_HIGH_MOTION_RATIO:-3.0}"', content)
+        self.assertIn('metric_depth_scale="${VINGS_METRIC_DEPTH_SCALE:-1.0}"', content)
         self.assertIn('lightglue_weight_dir="${VINGS_LIGHTGLUE_DIR:-$shared_root/ckpts/lightglue}"', content)
         self.assertIn('--loop-onnx-provider "$loop_onnx_provider"', content)
         self.assertIn('--frontend-image-size "$frontend_image_size"', content)
@@ -45,6 +46,7 @@ class RunJetsonHotelScriptTests(unittest.TestCase):
         self.assertIn('metric_depth_schedule_args+=(--metric-depth-keyframe-min-interval "$metric_depth_keyframe_min_interval")', content)
         self.assertIn('metric_depth_schedule_args+=(--metric-depth-keyframe-force-interval "$metric_depth_keyframe_force_interval")', content)
         self.assertIn('metric_depth_schedule_args+=(--metric-depth-high-motion-ratio "$metric_depth_high_motion_ratio")', content)
+        self.assertIn('--metric-depth-scale "$metric_depth_scale"', content)
 
 
 if __name__ == "__main__":
