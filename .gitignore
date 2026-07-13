@@ -1,6 +1,13 @@
 __pycache__/
+.pytest_cache/
 .vscode/
+build/
 build_gtsam/*
 # submodules/*  # Commented out to allow submodules
 ckpts/*
+data/
+engines/
+logs/
 output/*
+reports/
+*.so
