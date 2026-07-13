@@ -1,3 +1,4 @@
+import importlib
 import pathlib
 import sys
 import types
@@ -7,14 +8,20 @@ from unittest import mock
 
 import torch
 
+from tests.module_stubs import isolated_modules
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-sys.modules.setdefault("lietorch", types.SimpleNamespace(SE3=None, SO3=None, Sim3=None))
-sys.modules.setdefault("droid_backends", types.SimpleNamespace())
-sys.modules.setdefault("frontend.droid_net", types.SimpleNamespace(DroidNet=object))
-sys.modules.pop("frontend.motion_filter", None)
-
-from frontend.motion_filter import MotionFilter
+with isolated_modules(
+    {
+        "lietorch": types.SimpleNamespace(SE3=None, SO3=None, Sim3=None),
+        "droid_backends": types.SimpleNamespace(),
+        "frontend.droid_net": types.SimpleNamespace(DroidNet=object),
+    },
+    reload_modules=("frontend.motion_filter",),
+):
+    _motion_filter_module = importlib.import_module("frontend.motion_filter")
+    MotionFilter = _motion_filter_module.MotionFilter
 
 
 class FakeSE3:
@@ -74,9 +81,9 @@ class MotionFilterLazyDepthTests(unittest.TestCase):
         patches = [
             mock.patch.object(MotionFilter, "_MotionFilter__feature_encoder", fake_feature_encoder),
             mock.patch.object(MotionFilter, "_MotionFilter__context_encoder", fake_context_encoder),
-            mock.patch("frontend.motion_filter.lietorch.SE3", FakeSE3),
-            mock.patch("frontend.motion_filter.pops.coords_grid", lambda *args, **kwargs: torch.zeros(1, 1, 1, 2)),
-            mock.patch("frontend.motion_filter.CorrBlock", lambda *args, **kwargs: (lambda coords: torch.zeros(1, 1, 1, 1))),
+            mock.patch.object(_motion_filter_module.lietorch, "SE3", FakeSE3),
+            mock.patch.object(_motion_filter_module.pops, "coords_grid", lambda *args, **kwargs: torch.zeros(1, 1, 1, 2)),
+            mock.patch.object(_motion_filter_module, "CorrBlock", lambda *args, **kwargs: (lambda coords: torch.zeros(1, 1, 1, 1))),
         ]
         return patches, fake_update
 

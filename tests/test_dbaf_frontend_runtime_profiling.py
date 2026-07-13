@@ -1,3 +1,4 @@
+import importlib
 import pathlib
 import sys
 import types
@@ -8,15 +9,24 @@ from unittest import mock
 import numpy as np
 import torch
 
+from tests.module_stubs import isolated_modules
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-sys.modules.setdefault("lietorch", types.SimpleNamespace(SE3=None, SO3=None, Sim3=None))
-sys.modules.setdefault("droid_backends", types.SimpleNamespace())
-sys.modules.setdefault("frontend.covisible_graph", types.SimpleNamespace(CovisibleGraph=object))
-
-from scripts.frontend.dbaf_frontend import DBAFusionFrontend
+with isolated_modules(
+    {
+        "lietorch": types.SimpleNamespace(SE3=None, SO3=None, Sim3=None),
+        "droid_backends": types.SimpleNamespace(),
+        "frontend.covisible_graph": types.SimpleNamespace(CovisibleGraph=object),
+    },
+    reload_modules=("scripts.frontend.dbaf_frontend",),
+):
+    _dbaf_frontend_module = importlib.import_module(
+        "scripts.frontend.dbaf_frontend"
+    )
+    DBAFusionFrontend = _dbaf_frontend_module.DBAFusionFrontend
 
 
 class RecordingProfiler:
@@ -139,7 +149,7 @@ class DBAFusionFrontendRuntimeProfilingTests(unittest.TestCase):
     def test_update_records_internal_frontend_stages_for_new_keyframe(self):
         frontend = self.make_frontend()
 
-        with mock.patch("scripts.frontend.dbaf_frontend.SE3", FakePoseBatch):
+        with mock.patch.object(_dbaf_frontend_module, "SE3", FakePoseBatch):
             frontend._DBAFusionFrontend__update()
 
         self.assertEqual(
@@ -171,7 +181,7 @@ class DBAFusionFrontendRuntimeProfilingTests(unittest.TestCase):
         frontend.video.last_motion_score = 6.0
         frontend.video.last_motion_threshold = 2.5
 
-        with mock.patch("scripts.frontend.dbaf_frontend.SE3", FakePoseBatch):
+        with mock.patch.object(_dbaf_frontend_module, "SE3", FakePoseBatch):
             frontend._DBAFusionFrontend__update()
 
         update_calls = [call for call in frontend.graph.calls if call[0] == "update"]

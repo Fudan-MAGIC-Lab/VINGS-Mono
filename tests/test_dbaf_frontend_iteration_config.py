@@ -1,14 +1,15 @@
+import importlib
 import pathlib
 import sys
 import types
 import unittest
 
+from tests.module_stubs import isolated_modules
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-sys.modules.setdefault("lietorch", types.SimpleNamespace(SE3=None, SO3=None, Sim3=None))
-sys.modules.setdefault("droid_backends", types.SimpleNamespace())
 
 
 class DummyCovisibleGraph:
@@ -16,12 +17,19 @@ class DummyCovisibleGraph:
         pass
 
 
-sys.modules.setdefault(
-    "frontend.covisible_graph",
-    types.SimpleNamespace(CovisibleGraph=DummyCovisibleGraph),
-)
-
-from scripts.frontend.dbaf_frontend import DBAFusionFrontend
+with isolated_modules(
+    {
+        "lietorch": types.SimpleNamespace(SE3=None, SO3=None, Sim3=None),
+        "droid_backends": types.SimpleNamespace(),
+        "frontend.covisible_graph": types.SimpleNamespace(
+            CovisibleGraph=DummyCovisibleGraph
+        ),
+    },
+    reload_modules=("scripts.frontend.dbaf_frontend",),
+):
+    DBAFusionFrontend = importlib.import_module(
+        "scripts.frontend.dbaf_frontend"
+    ).DBAFusionFrontend
 
 
 class DummyNet:

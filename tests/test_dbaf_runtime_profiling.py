@@ -1,21 +1,28 @@
+import importlib
 import pathlib
 import sys
 import types
 import unittest
 from contextlib import contextmanager
 
+from tests.module_stubs import isolated_modules
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-sys.modules.setdefault("lietorch", types.SimpleNamespace(SE3=None, SO3=None, Sim3=None))
-sys.modules.setdefault("droid_backends", types.SimpleNamespace())
-sys.modules.setdefault("frontend.droid_net", types.SimpleNamespace(DroidNet=object))
-sys.modules.setdefault("frontend.depth_video", types.SimpleNamespace(DepthVideo=object))
-sys.modules.setdefault("frontend.motion_filter", types.SimpleNamespace(MotionFilter=object))
-sys.modules.setdefault("frontend.dbaf_frontend", types.SimpleNamespace(DBAFusionFrontend=object))
-sys.modules.setdefault("frontend.motion_gate", types.SimpleNamespace(JetsonMotionGate=object))
-
-from frontend.dbaf import DBAFusion
+with isolated_modules(
+    {
+        "lietorch": types.SimpleNamespace(SE3=None, SO3=None, Sim3=None),
+        "droid_backends": types.SimpleNamespace(),
+        "frontend.droid_net": types.SimpleNamespace(DroidNet=object),
+        "frontend.depth_video": types.SimpleNamespace(DepthVideo=object),
+        "frontend.motion_filter": types.SimpleNamespace(MotionFilter=object),
+        "frontend.dbaf_frontend": types.SimpleNamespace(DBAFusionFrontend=object),
+        "frontend.motion_gate": types.SimpleNamespace(JetsonMotionGate=object),
+    },
+    reload_modules=("frontend.dbaf",),
+):
+    DBAFusion = importlib.import_module("frontend.dbaf").DBAFusion
 
 
 class RecordingProfiler:
