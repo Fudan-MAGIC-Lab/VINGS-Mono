@@ -5,7 +5,8 @@ Date: 2026-07-13
 ## Decision
 
 Build an opt-in, Jetson-only bucketed CUDA Graph runtime for the VO
-`CovisibleGraph.update()` path at the current `43x77` feature resolution. The
+`CovisibleGraph.update()` path at the `43x77` feature resolution produced by a
+`344x616` frontend image. The
 long-term target is full-path replay across reprojection, correlation, the
 PyTorch DROID update operator, GraphAgg, Dense BA, and upsampling. Delivery is
 phased: first measure real runtime signatures, then capture all graph-safe GPU
@@ -127,6 +128,7 @@ The first version accepts only:
 ```text
 mode = vo
 feature_shape = 43x77
+frontend_image_size = 344x616
 backend = pytorch
 device = supported Jetson CUDA device
 ```
@@ -358,6 +360,10 @@ buckets with a stable positive microbenchmark result enter the online manifest.
 Run three alternating-order SmallCity-50 pairs. At least two pairs and the
 median must show positive improvement in both `frontend_dba_update` and
 `frame_total`. If this passes, run paired SmallCity-200 and complete Hotel.
+Every candidate and control run uses `--frontend-image-size 344,616`. In
+particular, Hotel validation overrides `run_jetson_hotel.sh`'s current
+`256,448` default; the existing `32x56` Hotel baselines are not valid controls
+for this feature.
 
 Every run records `tegrastats`, configuration, Git state, manifest hash,
 fallback counters, replay hit rate, process exit, and evaluator output. A short
@@ -392,10 +398,10 @@ conditions.
 - Changing DBA iteration counts or adaptive iteration policy.
 - Changing factor, keyframe, or active-window scheduling.
 - Supporting VIO in the first version.
-- Supporting feature resolutions other than `43x77`.
+- Supporting frontend image sizes other than `344x616` or feature resolutions
+  other than `43x77`.
 - Combining TensorRT update-core inference with CUDA Graph capture.
 - Capturing graph-management Python code.
 - Capturing new buckets during online tracking.
 - Removing the eager DBA implementation.
 - Enabling the feature by default without a separate decision.
-
