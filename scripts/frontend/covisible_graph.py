@@ -8,6 +8,7 @@ from frontend.modules.corr import CorrBlock, AltCorrBlock
 import frontend.geom.projective_ops as pops
 import matplotlib.pyplot as plt
 import cv2
+from contextlib import nullcontext
 from frontend.depth_video import DepthVideo
 import matplotlib.cm as cm
 import matplotlib
@@ -49,6 +50,8 @@ class CovisibleGraph:
         self.inac_range     = config['frontend']['inac_range']
         self.mask_threshold = config['frontend']['mask_threshold']
         self.img_count = 0
+        self.profiler = None
+        self.profiler_frame_idx = None
 
         self.skip_edge       = config['frontend']['skip_edge']
         self.frontend_window = config['frontend']['frontend_window']
@@ -57,6 +60,11 @@ class CovisibleGraph:
         self.show_covisible_graph = False
         self.show_oldest_disparity = False
         self.show_flow_and_weight = False
+
+    def _profile(self, stage):
+        if self.profiler is None:
+            return nullcontext()
+        return self.profiler.time(stage, self.profiler_frame_idx)
 
     def __filter_repeated_edges(self, ii, jj):
         """ remove duplicate edges """
@@ -221,7 +229,8 @@ class CovisibleGraph:
             motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
             motn = motn.permute(0,1,4,2,3).clamp(-64.0, 64.0) # 1,2,4,48,96
 
-        corr = self.corr(coords1) 
+        with self._profile("covisible_graph_corr"):
+            corr = self.corr(coords1)
 
         self.net, delta, weight, damping, upmask = \
             self.update_op(self.net, self.inp, corr, motn, self.ii, self.jj, self.upsample)
@@ -340,14 +349,16 @@ class CovisibleGraph:
             weight = weight.view(-1, ht, wd, 2).permute(0,3,1,2).contiguous()
 
             # Dense bundle adjustment
-            self.video.ba(target, weight, damping, ii, jj, t0, t1, 
-                itrs=itrs, lm=1e-4, ep=0.1, motion_only=motion_only)
+            with self._profile("covisible_graph_ba"):
+                self.video.ba(target, weight, damping, ii, jj, t0, t1,
+                    itrs=itrs, lm=1e-4, ep=0.1, motion_only=motion_only)
         
             if self.upsample:
                 '''
                 upmask.shape = [1, 8, 576, 43, 77]
                 '''
-                self.video.upsample(torch.unique(self.ii), upmask)
+                with self._profile("covisible_graph_upsample"):
+                    self.video.upsample(torch.unique(self.ii), upmask)
 
         self.age += 1
 

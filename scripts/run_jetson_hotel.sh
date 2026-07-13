@@ -18,6 +18,13 @@ frontend_weight="${VINGS_DROID_WEIGHT:-$shared_root/ckpts/droid.pth}"
 lightglue_weight_dir="${VINGS_LIGHTGLUE_DIR:-$shared_root/ckpts/lightglue}"
 loop_onnx_provider="${VINGS_LOOP_ONNX_PROVIDER:-cpu}"
 frontend_image_size="${VINGS_FRONTEND_IMAGE_SIZE:-256,448}"
+frontend_iters1="${VINGS_FRONTEND_ITERS1:-3}"
+frontend_iters2="${VINGS_FRONTEND_ITERS2:-1}"
+frontend_adaptive_iters="${VINGS_FRONTEND_ADAPTIVE_ITERS:-0}"
+frontend_iters1_high="${VINGS_FRONTEND_ITERS1_HIGH:-3}"
+frontend_iters2_high="${VINGS_FRONTEND_ITERS2_HIGH:-1}"
+frontend_iters_high_motion_ratio="${VINGS_FRONTEND_ITERS_HIGH_MOTION_RATIO:-2.0}"
+frontend_iters_force_interval="${VINGS_FRONTEND_ITERS_FORCE_INTERVAL:-0}"
 training_iters="${VINGS_TRAINING_ITERS:-30}"
 adaptive_runtime="${VINGS_ADAPTIVE_RUNTIME:-1}"
 mapping_budget="${VINGS_MAPPING_BUDGET:-0}"
@@ -58,6 +65,15 @@ fi
 profile_runtime_args=()
 if [ "$profile_runtime" != "0" ]; then
   profile_runtime_args+=(--profile-runtime)
+fi
+
+frontend_adaptive_iters_args=()
+if [ "$frontend_adaptive_iters" != "0" ]; then
+  frontend_adaptive_iters_args+=(--frontend-adaptive-iters)
+  frontend_adaptive_iters_args+=(--frontend-iters1-high "$frontend_iters1_high")
+  frontend_adaptive_iters_args+=(--frontend-iters2-high "$frontend_iters2_high")
+  frontend_adaptive_iters_args+=(--frontend-iters-high-motion-ratio "$frontend_iters_high_motion_ratio")
+  frontend_adaptive_iters_args+=(--frontend-iters-force-interval "$frontend_iters_force_interval")
 fi
 
 metric_depth_schedule_args=()
@@ -102,6 +118,8 @@ python scripts/run.py \
   --lightglue-weight-dir "$lightglue_weight_dir" \
   --loop-onnx-provider "$loop_onnx_provider" \
   --frontend-image-size "$frontend_image_size" \
+  --frontend-iters1 "$frontend_iters1" \
+  --frontend-iters2 "$frontend_iters2" \
   --training-iters "$training_iters" \
   --metric-depth-scale "$metric_depth_scale" \
   "${adaptive_runtime_args[@]}" \
@@ -109,6 +127,7 @@ python scripts/run.py \
   "${pruning_budget_args[@]}" \
   "${pixel_budget_args[@]}" \
   "${profile_runtime_args[@]}" \
+  "${frontend_adaptive_iters_args[@]}" \
   "${metric_depth_schedule_args[@]}" \
   --device-tracker "$tracker_device" \
   --device-mapper "$mapper_device"

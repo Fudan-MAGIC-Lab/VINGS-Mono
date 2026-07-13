@@ -1,0 +1,116 @@
+use_wandb: False
+use_sky: False
+use_dynamic: False
+use_pose_refine: False
+use_metric: False
+debug_mode: False
+
+mode: 'vo'
+
+device:
+  tracker: 'cuda:0'
+  mapper: 'cuda:0'
+
+dataset:
+  module: datasets.gstreamer_nvmm
+  length: 300
+  timestamp_start: 0.0
+  timestamp_step: 0.0333333333
+  timeout_s: 2.0
+  pipeline: "nvarguscamerasrc ! video/x-raw(memory:NVMM),width=1280,height=720,format=NV12,framerate=30/1 ! tee name=t t. ! queue ! appsink name=appsink_nvmm sync=false max-buffers=1 drop=true t. ! queue ! nvvidconv ! video/x-raw,format=RGB,width=448,height=256 ! appsink name=appsink_rgb sync=false max-buffers=1 drop=true"
+
+middleware:
+  cov_times: 1000
+  max_cov: 3e3
+  max_depth: 35
+
+output:
+  save_dir: output/
+
+intrinsic:
+  H: 720
+  W: 1280
+  fu: 600.0
+  fv: 600.0
+  cu: 360.0
+  cv: 640.0
+  resolution_scale: 1.0
+  bg: 0
+
+frontend:
+  weight: ckpts/droid.pth
+  image_size: [256, 448]
+  buffer: 80
+  filter_thresh: 2.4
+  c2i: None
+  warm_up: 8
+  beta: 0.3
+  frontend_nms: 1
+  keyframe_thresh: 4.0
+  frontend_window: 5
+  frontend_thresh: 16.0
+  frontend_radius: 2
+  active_window: 12
+  max_factors: 48
+  far_threshold: 0.02
+  inac_range: 3
+  mask_threshold: -1.0
+  skip_edge: [-4, -5, -6]
+  translation_threshold: 0.5
+  show_plot: False
+
+jetson_motion_gate:
+  enabled: True
+  backend: vpi_nvbuffer
+  threshold: 1.0
+  force_interval: 8
+  resize: [96, 160]
+  grid_size: 4
+  vpi_quality: low
+  score_percentile: 90.0
+
+adc_args:
+  accum_thresh: 0.98
+
+mapping_budget:
+  enabled: True
+  fixed_new_gaussians: 40000
+  accum_threshold: 0.98
+  gaussian_thresholds: [150000, 300000, 600000]
+  new_gaussian_budgets: [40000, 25000, 12000, 6000]
+  min_new_gaussians: 2000
+  log: True
+
+pruning_budget:
+  enabled: True
+  gaussian_thresholds: [150000, 300000, 600000]
+  intervals: [4, 3, 2, 1]
+  low_thresholds: [0.05, 0.05, 0.04, 0.03]
+  high_thresholds: [0.8, 0.75, 0.7, 0.65]
+  max_prune_ratios: [0.05, 0.08, 0.12, 0.16]
+  log: True
+
+pixel_budget:
+  enabled: True
+  gaussian_thresholds: [150000, 300000, 600000]
+  keep_ratios: [1.0, 0.75, 0.5, 0.5]
+  log: True
+
+training_args:
+  num_keyframe: 8
+  iters: 10
+  lr:
+    _xyz_lr: 0.0001
+    _rgb_lr: 0.0005
+    _opacity_lr: 0.05
+    _scaling_lr: 0.001
+    _rotation_lr: 0.001
+  loss_weights:
+    rgb_loss: 1.0
+    depth_loss: 1.0
+    alpha_loss: 1.0
+    normal_loss: 0.1
+    dist_loss: 0.0
+
+use_vis: False
+use_storage_manager: False

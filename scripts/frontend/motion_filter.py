@@ -3,6 +3,7 @@ import torch
 import lietorch
 
 from collections import OrderedDict
+from contextlib import nullcontext
 from frontend.droid_net import DroidNet
 
 import frontend.geom.projective_ops as pops
@@ -33,10 +34,18 @@ class MotionFilter:
         self.device = device
 
         self.count = 0
+        self.profiler = None
+        self.profiler_frame_idx = None
 
         # mean, std for image normalization
         self.MEAN = torch.as_tensor([0.485, 0.456, 0.406], device=self.device)[:, None, None]
         self.STDV = torch.as_tensor([0.229, 0.224, 0.225], device=self.device)[:, None, None]
+
+    def _profile(self, stage):
+        profiler = getattr(self, "profiler", None)
+        if profiler is None:
+            return nullcontext()
+        return profiler.time(stage, getattr(self, "profiler_frame_idx", None))
         
     @torch.cuda.amp.autocast(enabled=True)
     def __context_encoder(self, image):
@@ -74,35 +83,54 @@ class MotionFilter:
         inputs = inputs.sub_(self.MEAN).div_(self.STDV)
 
         # extract features
-        gmap = self.__feature_encoder(inputs) #当前帧的特征, fnet
+        with self._profile("motion_filter_feature_encoder"):
+            gmap = self.__feature_encoder(inputs) #当前帧的特征, fnet
 
         ### always add first frame to the depth video ###
         if self.video.counter.value == 0:
-            net, inp = self.__context_encoder(inputs[:,[0]])
+            self.video.last_motion_score = None
+            self.video.last_motion_threshold = self.thresh
+            self.video.last_motion_added_keyframe = True
+            with self._profile("motion_filter_context_encoder"):
+                net, inp = self.__context_encoder(inputs[:,[0]])
             self.net, self.inp, self.fmap = net, inp, gmap # [1,128,H//8,W//8], [1,128,H//8,W//8], [1,128,H//8,W//8]
-            self.video.append(tstamp, image[0], Id, 1.0, _resolve_lazy_depth(depth), intrinsics / 8.0, gmap, net[0,0], inp[0,0])
+            with self._profile("lazy_metric_depth_inside_tracking"):
+                depth_value = _resolve_lazy_depth(depth)
+            with self._profile("motion_filter_append"):
+                self.video.append(tstamp, image[0], Id, 1.0, depth_value, intrinsics / 8.0, gmap, net[0,0], inp[0,0])
 
         ### only add new frame if there is enough motion ###
         else:                
-            # index correlation volume
-            coords0 = pops.coords_grid(ht, wd, device=self.device)[None,None]
+            with self._profile("motion_filter_corr_update"):
+                # index correlation volume
+                coords0 = pops.coords_grid(ht, wd, device=self.device)[None,None]
 
-            corr = CorrBlock(self.fmap[None,[0]], gmap[None,[0]])(coords0) #关键帧和当前帧之间的相关运算 [None,[0]]即保留第一行之后进行unsqueeze(0)，
-            
-            # approximate flow magnitude using 1 update iteration
-            _, delta, weight = self.update(self.net[None], self.inp[None], corr)
+                corr = CorrBlock(self.fmap[None,[0]], gmap[None,[0]])(coords0) #关键帧和当前帧之间的相关运算 [None,[0]]即保留第一行之后进行unsqueeze(0)，
+
+                # approximate flow magnitude using 1 update iteration
+                _, delta, weight = self.update(self.net[None], self.inp[None], corr)
 
             # check motion magnitue / add new frame to video
             motion_score = delta.norm(dim=-1).mean().item()
+            self.video.last_motion_score = motion_score
+            self.video.last_motion_threshold = self.thresh
+            self.video.last_motion_added_keyframe = motion_score > self.thresh
             if motion_score > self.thresh:
                 self.count = 0
-                net, inp = self.__context_encoder(inputs[:,[0]]) 
+                with self._profile("motion_filter_context_encoder"):
+                    net, inp = self.__context_encoder(inputs[:,[0]])
                 self.net, self.inp, self.fmap = net, inp, gmap 
-                self.video.append(
-                    tstamp, image[0], None, None,
-                    _resolve_lazy_depth(depth, motion_score=motion_score, motion_threshold=self.thresh),
-                    intrinsics / 8.0, gmap, net[0], inp[0]
-                )
+                with self._profile("lazy_metric_depth_inside_tracking"):
+                    depth_value = _resolve_lazy_depth(
+                        depth,
+                        motion_score=motion_score,
+                        motion_threshold=self.thresh,
+                    )
+                with self._profile("motion_filter_append"):
+                    self.video.append(
+                        tstamp, image[0], None, None,
+                        depth_value,
+                        intrinsics / 8.0, gmap, net[0], inp[0]
+                    )
             else:
                 self.count += 1
-

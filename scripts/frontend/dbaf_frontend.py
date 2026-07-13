@@ -5,6 +5,7 @@ import numpy as np
 from lietorch import SE3, SO3
 from frontend.covisible_graph import CovisibleGraph
 import matplotlib.pyplot as plt
+from contextlib import nullcontext
 
 try:
     import gtsam
@@ -71,6 +72,14 @@ class DBAFusionFrontend:
             self.max_age = 25
             self.iters1 = 4 # 4
             self.iters2 = 2 # 2
+        self.iters1 = int(cfg['frontend'].get('iters1', self.iters1))
+        self.iters2 = int(cfg['frontend'].get('iters2', self.iters2))
+        self.adaptive_iters_enabled = bool(cfg['frontend'].get('adaptive_iters_enabled', False))
+        self.iters1_high = int(cfg['frontend'].get('iters1_high', self.iters1))
+        self.iters2_high = int(cfg['frontend'].get('iters2_high', self.iters2))
+        self.iters_high_motion_ratio = float(cfg['frontend'].get('iters_high_motion_ratio', 2.0))
+        self.iters_force_interval = int(cfg['frontend'].get('iters_force_interval', 0))
+        self.update_call_count = 0
 
         # visualization/output
         self.show_plot = cfg['frontend']['show_plot']
@@ -82,6 +91,8 @@ class DBAFusionFrontend:
         self.refTw       = np.eye(4,4)
 
         self.new_frame_added = False
+        self.profiler = None
+        self.profiler_frame_idx = None
         
         if self.show_plot:
             plt.figure('monitor',figsize=[13,4])
@@ -91,6 +102,27 @@ class DBAFusionFrontend:
             plt.subplot(1,3,3); plt.gca().set_title('Gyroscope Bias')
             plt.ion()
             plt.pause(0.1)
+
+    def _profile(self, stage):
+        profiler = getattr(self, "profiler", None)
+        if profiler is None:
+            return nullcontext()
+        return profiler.time(stage, getattr(self, "profiler_frame_idx", None))
+
+    def select_update_iters(self):
+        if not self.adaptive_iters_enabled:
+            return self.iters1, self.iters2
+
+        if self.iters_force_interval > 0 and (self.update_call_count + 1) % self.iters_force_interval == 0:
+            return self.iters1_high, self.iters2_high
+
+        motion_score = getattr(self.video, "last_motion_score", None)
+        motion_threshold = getattr(self.video, "last_motion_threshold", None)
+        if motion_score is not None and motion_threshold is not None:
+            if motion_score >= motion_threshold * self.iters_high_motion_ratio:
+                return self.iters1_high, self.iters2_high
+
+        return self.iters1, self.iters2
 
     def get_pose_ref(self, tt:float):
         tt_found = self.all_gt_keys[bisect.bisect(self.all_gt_keys,tt)]
@@ -174,240 +206,256 @@ class DBAFusionFrontend:
             raise ModuleNotFoundError(
                 "gtsam is required when IMU mode is enabled."
             )
-        self.new_frame_added = False
-        self.count += 1
-        self.t1 += 1
-        
-        if self.video.imu_enabled and (self.video.tstamp[self.t1-1] - self.video.vi_init_time > 5.0):
-            self.video.reinit = True
-            self.video.vi_init_time = 1e9
+        with self._profile("frontend_update_bookkeeping"):
+            self.new_frame_added = False
+            self.count += 1
+            self.t1 += 1
             
-        ## new frame comes, append IMU
-        cur_t = float(self.video.tstamp[self.t1-1].detach().cpu())
+            if self.video.imu_enabled and (self.video.tstamp[self.t1-1] - self.video.vi_init_time > 5.0):
+                self.video.reinit = True
+                self.video.vi_init_time = 1e9
+
+            ## new frame comes, append IMU
+            cur_t = float(self.video.tstamp[self.t1-1].detach().cpu())
         # self.video.logger.info('predict %f' %cur_t)
 
-        if (not self.visual_only) and (self.video.state is not None):
-            while self.all_imu[self.cur_imu_ii][0] < cur_t:
-                ## high-frequency output
-                # predict the pose of skipped frames through IMU preintegration
-                if self.high_freq_output and self.video.imu_enabled: 
-                    if self.all_imu[self.cur_imu_ii][0] > float(self.all_stamp[self.cur_stamp_ii][0]):
-                        self.video.state.append_imu_temp(float(self.all_stamp[self.cur_stamp_ii][0]),\
-                                                        self.all_imu[self.cur_imu_ii][4:7],\
-                                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi,True)
-                        if float(self.all_stamp[self.cur_stamp_ii][0]) > self.video.state.timestamps[-1] and\
-                              math.fabs(cur_t - float(self.all_stamp[self.cur_stamp_ii][0]))>1e-3:
-                            pose_temp = self.video.state.pose_temp
-                            ppp = pose_temp.pose().translation()
-                            qqq = Rotation.from_matrix(pose_temp.pose().rotation().matrix()).as_quat()
-                            line = '%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f'%(float(self.all_stamp[self.cur_stamp_ii][0]),ppp[0],ppp[1],ppp[2]\
-                                                ,qqq[0],qqq[1],qqq[2],qqq[3])
-                            if self.video.gnss_init_t1>0:
-                                p = self.video.ten0 + np.matmul(trans.Cen(self.video.ten0), ppp)
-                                line += ' %.6f %.6f %.6f'% (p[0],p[1],p[2]) 
-                            
-                        self.cur_stamp_ii += 1
-                    self.video.state.append_imu_temp(self.all_imu[self.cur_imu_ii][0],\
-                                        self.all_imu[self.cur_imu_ii][4:7],\
-                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+        with self._profile("frontend_update_imu_ingest"):
+            if (not self.visual_only) and (self.video.state is not None):
+                while self.all_imu[self.cur_imu_ii][0] < cur_t:
+                    ## high-frequency output
+                    # predict the pose of skipped frames through IMU preintegration
+                    if self.high_freq_output and self.video.imu_enabled:
+                        if self.all_imu[self.cur_imu_ii][0] > float(self.all_stamp[self.cur_stamp_ii][0]):
+                            self.video.state.append_imu_temp(float(self.all_stamp[self.cur_stamp_ii][0]),\
+                                                            self.all_imu[self.cur_imu_ii][4:7],\
+                                                            self.all_imu[self.cur_imu_ii][1:4]/180*math.pi,True)
+                            if float(self.all_stamp[self.cur_stamp_ii][0]) > self.video.state.timestamps[-1] and\
+                                  math.fabs(cur_t - float(self.all_stamp[self.cur_stamp_ii][0]))>1e-3:
+                                pose_temp = self.video.state.pose_temp
+                                ppp = pose_temp.pose().translation()
+                                qqq = Rotation.from_matrix(pose_temp.pose().rotation().matrix()).as_quat()
+                                line = '%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f'%(float(self.all_stamp[self.cur_stamp_ii][0]),ppp[0],ppp[1],ppp[2]\
+                                                    ,qqq[0],qqq[1],qqq[2],qqq[3])
+                                if self.video.gnss_init_t1>0:
+                                    p = self.video.ten0 + np.matmul(trans.Cen(self.video.ten0), ppp)
+                                    line += ' %.6f %.6f %.6f'% (p[0],p[1],p[2])
+
+                            self.cur_stamp_ii += 1
+                        self.video.state.append_imu_temp(self.all_imu[self.cur_imu_ii][0],\
+                                            self.all_imu[self.cur_imu_ii][4:7],\
+                                            self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+
+                    self.video.state.append_imu(self.all_imu[self.cur_imu_ii][0],\
+                                            self.all_imu[self.cur_imu_ii][4:7],\
+                                            self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+                    self.cur_imu_ii += 1
+                    '''
+                    self.all_imu[self.cur_imu_ii]
+                    '''
+                # ---------------------------------------------------------------------------
+
+                self.video.state.append_imu(cur_t,\
+                                            self.all_imu[self.cur_imu_ii][4:7],\
+                                            self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+                self.video.state.append_img(cur_t)
                 
+                ## append GNSS, self.all_gnss=[]
+                if len(self.all_gnss) > 0: gnss_found = bisect.bisect(self.all_gnss[:,0],cur_t - 1e-6)
+                else: gnss_found = -1
+                if gnss_found > 0 and self.all_gnss[gnss_found,0] - cur_t < 0.01 :
+                    self.video.state.append_gnss(cur_t,self.all_gnss[gnss_found,1:4])
+
+                ## append ZUPT, self.zupt=False
+                if self.zupt and self.video.state.preintegrations[self.t1-3].deltaTij() > 3.0:
+                    if np.linalg.norm(self.video.state.vs[self.t1-2]) < 0.025:
+                        self.video.state.append_odo(cur_t,np.array([.0,.0,.0]))
+
+                ## append ODO, self.all_odo=[]
+                if len(self.all_odo) > 0: odo_found = bisect.bisect(self.all_odo[:,0],cur_t - 1e-6)
+                else: odo_found = -1
+                if odo_found > 0 and self.all_odo[odo_found,0] - cur_t < 0.01 :
+                    self.video.state.append_odo(cur_t,self.all_odo[odo_found,1:4])
+
                 self.video.state.append_imu(self.all_imu[self.cur_imu_ii][0],\
-                                        self.all_imu[self.cur_imu_ii][4:7],\
-                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
+                                self.all_imu[self.cur_imu_ii][4:7],\
+                                self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
                 self.cur_imu_ii += 1
-                '''
-                self.all_imu[self.cur_imu_ii]
-                '''
-            # ---------------------------------------------------------------------------
 
-            self.video.state.append_imu(cur_t,\
-                                        self.all_imu[self.cur_imu_ii][4:7],\
-                                        self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
-            self.video.state.append_img(cur_t)
-            
-            ## append GNSS, self.all_gnss=[]
-            if len(self.all_gnss) > 0: gnss_found = bisect.bisect(self.all_gnss[:,0],cur_t - 1e-6)
-            else: gnss_found = -1        
-            if gnss_found > 0 and self.all_gnss[gnss_found,0] - cur_t < 0.01 :
-                self.video.state.append_gnss(cur_t,self.all_gnss[gnss_found,1:4])
-
-            ## append ZUPT, self.zupt=False
-            if self.zupt and self.video.state.preintegrations[self.t1-3].deltaTij() > 3.0:
-                if np.linalg.norm(self.video.state.vs[self.t1-2]) < 0.025:
-                    self.video.state.append_odo(cur_t,np.array([.0,.0,.0]))
-
-            ## append ODO, self.all_odo=[]
-            if len(self.all_odo) > 0: odo_found = bisect.bisect(self.all_odo[:,0],cur_t - 1e-6)
-            else: odo_found = -1        
-            if odo_found > 0 and self.all_odo[odo_found,0] - cur_t < 0.01 :
-                self.video.state.append_odo(cur_t,self.all_odo[odo_found,1:4])
-
-            self.video.state.append_imu(self.all_imu[self.cur_imu_ii][0],\
-                            self.all_imu[self.cur_imu_ii][4:7],\
-                            self.all_imu[self.cur_imu_ii][1:4]/180*math.pi)
-            self.cur_imu_ii += 1
-
-            ## predict pose (<5 ms)
-            if self.video.imu_enabled:
-                Twc = (self.video.state.wTbs[-1] * self.video.Tbc).matrix()
-                TTT = torch.tensor(np.linalg.inv(Twc))
-                q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
-                t = TTT[:3,3]
-                self.video.poses[self.t1-1] = torch.cat([t,q])
+                ## predict pose (<5 ms)
+                if self.video.imu_enabled:
+                    Twc = (self.video.state.wTbs[-1] * self.video.Tbc).matrix()
+                    TTT = torch.tensor(np.linalg.inv(Twc))
+                    q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
+                    t = TTT[:3,3]
+                    self.video.poses[self.t1-1] = torch.cat([t,q])
 
         # self.video.logger.info('manage edges')
 
         ## manage edges (60 ms)
-        if self.graph.corr is not None:
-            if self.visual_only:
-                self.graph.rm_factors(torch.logical_and(self.graph.age > self.max_age,\
-                torch.logical_or(self.graph.ii < self.t1-self.active_window,self.graph.jj < self.t1-self.active_window)), store=True)
-            else:
-                self.graph.rm_factors(torch.logical_or(self.graph.age > self.max_age,\
-                torch.logical_or(self.graph.ii < self.t1-self.active_window,self.graph.jj < self.t1-self.active_window)), store=True)
+        with self._profile("frontend_update_manage_edges"):
+            if self.graph.corr is not None:
+                if self.visual_only:
+                    self.graph.rm_factors(torch.logical_and(self.graph.age > self.max_age,\
+                    torch.logical_or(self.graph.ii < self.t1-self.active_window,self.graph.jj < self.t1-self.active_window)), store=True)
+                else:
+                    self.graph.rm_factors(torch.logical_or(self.graph.age > self.max_age,\
+                    torch.logical_or(self.graph.ii < self.t1-self.active_window,self.graph.jj < self.t1-self.active_window)), store=True)
 
-        self.graph.add_proximity_factors(self.t1-5, max(self.t1-self.frontend_window, 0), 
-            rad=self.frontend_radius, nms=self.frontend_nms, thresh=self.frontend_thresh, beta=self.beta, remove=True)
+        with self._profile("frontend_update_add_proximity_factors"):
+            self.graph.add_proximity_factors(self.t1-5, max(self.t1-self.frontend_window, 0),
+                rad=self.frontend_radius, nms=self.frontend_nms, thresh=self.frontend_thresh, beta=self.beta, remove=True)
 
         # self.video.logger.info('non-keyframes %d' % self.graph.ii.shape[0])
+        update_iters1, update_iters2 = self.select_update_iters()
+        self.update_call_count += 1
 
         ## non-keyframe update
-        self.video.disps[self.t1-1] = torch.where(self.video.disps_sens[self.t1-1] > 0, 
-                                                  self.video.disps_sens[self.t1-1], self.video.disps[self.t1-1])
+        with self._profile("frontend_update_non_keyframe_prepare"):
+            self.video.disps[self.t1-1] = torch.where(self.video.disps_sens[self.t1-1] > 0,
+                                                      self.video.disps_sens[self.t1-1], self.video.disps[self.t1-1])
         
-        for itr in range(self.iters1):
-            self.graph.update(None, None, use_inactive=True)
+        with self._profile("frontend_update_non_keyframe_graph_update"):
+            for itr in range(update_iters1):
+                self.graph.update(None, None, use_inactive=True)
 
         self.rollup = False
         if self.t1 > 65:
-            self.__rollup(30)
-            # print('rollup ',self.graph.ii)
-            self.rollup = True
+            with self._profile("frontend_update_rollup"):
+                self.__rollup(30)
+                # print('rollup ',self.graph.ii)
+                self.rollup = True
 
         # self.video.logger.info('output')
 
         ## visualization/output
-        poses = SE3(self.video.poses)
-        d = self.video.distance([self.t1-3], [self.t1-2], beta=self.beta, bidirectional=True)
-        TTT = np.matmul(poses[self.t1-1].cpu().inv().matrix(),np.linalg.inv(self.video.Ti1c))
-        if self.video.imu_enabled or (self.visual_only and self.visual_only_init):
-            ppp = TTT[0:3,3]
-            qqq = Rotation.from_matrix(TTT[:3, :3]).as_quat()
-            line = '%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f'%(cur_t,ppp[0],ppp[1],ppp[2]\
-                                        ,qqq[0],qqq[1],qqq[2],qqq[3])
-            if self.video.gnss_init_t1>0:
-                p = self.video.ten0 + np.matmul(trans.Cen(self.video.ten0), ppp.numpy())
-                line += ' %.6f %.6f %.6f'% (p[0],p[1],p[2]) 
-            # self.result_file.writelines(line+'\n')
-            # self.result_file.flush()
+        with self._profile("frontend_update_output_pose_distance"):
+            poses = SE3(self.video.poses)
+            d = self.video.distance([self.t1-3], [self.t1-2], beta=self.beta, bidirectional=True)
+            TTT = np.matmul(poses[self.t1-1].cpu().inv().matrix(),np.linalg.inv(self.video.Ti1c))
+            if self.video.imu_enabled or (self.visual_only and self.visual_only_init):
+                ppp = TTT[0:3,3]
+                qqq = Rotation.from_matrix(TTT[:3, :3]).as_quat()
+                line = '%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f'%(cur_t,ppp[0],ppp[1],ppp[2]\
+                                            ,qqq[0],qqq[1],qqq[2],qqq[3])
+                if self.video.gnss_init_t1>0:
+                    p = self.video.ten0 + np.matmul(trans.Cen(self.video.ten0), ppp.numpy())
+                    line += ' %.6f %.6f %.6f'% (p[0],p[1],p[2])
+                # self.result_file.writelines(line+'\n')
+                # self.result_file.flush()
 
-        TTTref = np.matmul(self.refTw,TTT)
-        ppp = TTTref[0:3,3]
-        if self.show_plot:
-            # if math.fabs(tt_found - cur_t) < 0.1: # for kitti and whu
-            self.plt_pos[0].append(ppp[0])
-            self.plt_pos[1].append(ppp[1])
-            a1 = np.array(trans.m2att(TTTref[0:3,0:3])     )* 57.3
-            if self.all_gt is not None:
-                tt_found,dd = self.get_pose_ref(cur_t -1e-3)
-                self.plt_pos_ref[0].append(dd['T'][0,3])
-                self.plt_pos_ref[1].append(dd['T'][1,3])    
-                a2 = np.array(trans.m2att(dd['T'][0:3,0:3]) )* 57.3    
-                a1 -= a2
-            self.plt_att[0].append(a1[0])
-            self.plt_att[1].append(a1[1])
-            self.plt_att[2].append(a1[2])
-            if self.video.state is not None:
-                bg = self.video.state.bs[self.t1-1].gyroscope()
-                self.plt_bg[0].append(bg[0])
-                self.plt_bg[1].append(bg[1])
-                self.plt_bg[2].append(bg[2])
-            self.plt_t.append(cur_t)
-            
-            if self.rollup:
-                plt.subplot(1,3,1)
-                plt.cla(); plt.gca().set_title('Trajectory')
-                plt.plot(self.plt_pos[0],self.plt_pos[1],marker='^')
-                # plt.plot(self.plt_pos_ref[0],self.plt_pos_ref[1],marker='^')
-                plt.subplot(1,3,2)
-                plt.cla(); plt.gca().set_title('Attitude Error/Attitude')
-                plt.plot(self.plt_t,self.plt_att[0],c='r')
-                plt.plot(self.plt_t,self.plt_att[1],c='g')
-                plt.plot(self.plt_t,self.plt_att[2],c='b')
-                plt.ylim([-10,10])
-                plt.subplot(1,3,3)
-                plt.cla(); plt.gca().set_title('Gyroscope Bias')
-                plt.plot(self.plt_t,self.plt_bg[0],c='r')
-                plt.plot(self.plt_t,self.plt_bg[1],c='g')
-                plt.plot(self.plt_t,self.plt_bg[2],c='b')
-                plt.pause(0.1)
+            TTTref = np.matmul(self.refTw,TTT)
+            ppp = TTTref[0:3,3]
+            if self.show_plot:
+                # if math.fabs(tt_found - cur_t) < 0.1: # for kitti and whu
+                self.plt_pos[0].append(ppp[0])
+                self.plt_pos[1].append(ppp[1])
+                a1 = np.array(trans.m2att(TTTref[0:3,0:3])     )* 57.3
+                if self.all_gt is not None:
+                    tt_found,dd = self.get_pose_ref(cur_t -1e-3)
+                    self.plt_pos_ref[0].append(dd['T'][0,3])
+                    self.plt_pos_ref[1].append(dd['T'][1,3])
+                    a2 = np.array(trans.m2att(dd['T'][0:3,0:3]) )* 57.3
+                    a1 -= a2
+                self.plt_att[0].append(a1[0])
+                self.plt_att[1].append(a1[1])
+                self.plt_att[2].append(a1[2])
+                if self.video.state is not None:
+                    bg = self.video.state.bs[self.t1-1].gyroscope()
+                    self.plt_bg[0].append(bg[0])
+                    self.plt_bg[1].append(bg[1])
+                    self.plt_bg[2].append(bg[2])
+                self.plt_t.append(cur_t)
+
+                if self.rollup:
+                    plt.subplot(1,3,1)
+                    plt.cla(); plt.gca().set_title('Trajectory')
+                    plt.plot(self.plt_pos[0],self.plt_pos[1],marker='^')
+                    # plt.plot(self.plt_pos_ref[0],self.plt_pos_ref[1],marker='^')
+                    plt.subplot(1,3,2)
+                    plt.cla(); plt.gca().set_title('Attitude Error/Attitude')
+                    plt.plot(self.plt_t,self.plt_att[0],c='r')
+                    plt.plot(self.plt_t,self.plt_att[1],c='g')
+                    plt.plot(self.plt_t,self.plt_att[2],c='b')
+                    plt.ylim([-10,10])
+                    plt.subplot(1,3,3)
+                    plt.cla(); plt.gca().set_title('Gyroscope Bias')
+                    plt.plot(self.plt_t,self.plt_bg[0],c='r')
+                    plt.plot(self.plt_t,self.plt_bg[1],c='g')
+                    plt.plot(self.plt_t,self.plt_bg[2],c='b')
+                    plt.pause(0.1)
 
 
         ## keyframe update
         # self.video.logger.info('keyframes %d' % self.graph.ii.shape[0])
-        if self.t1 > 10:
-            cam_translation =  torch.norm((poses[(self.t1-10):(self.t1-3)] * poses[self.t1-2].inv()[None]).translation()[:,0:3],dim=1)
-        else:
-            cam_translation =  torch.norm((poses[(self.t1-6):(self.t1-3)] * poses[self.t1-2].inv()[None]).translation()[:,0:3],dim=1)
+        with self._profile("frontend_update_keyframe_decision"):
+            if self.t1 > 10:
+                cam_translation =  torch.norm((poses[(self.t1-10):(self.t1-3)] * poses[self.t1-2].inv()[None]).translation()[:,0:3],dim=1)
+            else:
+                cam_translation =  torch.norm((poses[(self.t1-6):(self.t1-3)] * poses[self.t1-2].inv()[None]).translation()[:,0:3],dim=1)
+            should_remove_keyframe = d.item() < self.keyframe_thresh
 
         # if (d.item() < self.keyframe_thresh or (self.video.imu_enabled and torch.sum(cam_translation < self.translation_threshold)>0)): # gnss
         # TTD 2024/09/27
         # Dangerous Option.
-        if (d.item() < self.keyframe_thresh):
-            self.graph.rm_keyframe(self.t1 - 2)
+        if should_remove_keyframe:
+            with self._profile("frontend_update_remove_keyframe"):
+                self.graph.rm_keyframe(self.t1 - 2)
 
-            if (not self.visual_only) and (self.video.state is not None):
-                # merge preintegration[self.t1-2] and preintegration[self.t1-3]
-                for iii in range(len(self.video.state.preintegrations_meas[self.t1-2])):
-                    dd = self.video.state.preintegrations_meas[self.t1-2][iii]
-                    if dd[2] > 0:
-                        self.video.state.preintegrations[self.t1-3].integrateMeasurement(dd[0],\
-                                                                                         dd[1],\
-                                                                                         dd[2])
-                    self.video.state.preintegrations_meas[self.t1-3].append(dd)
-                    
-                self.video.state.preintegrations[self.t1-2] = self.video.state.preintegrations[self.t1-1]
-                self.video.state.preintegrations_meas[self.t1-2] = self.video.state.preintegrations_meas[self.t1-1]
-                self.video.state.preintegrations.pop()
-                self.video.state.preintegrations_meas.pop()
+                if (not self.visual_only) and (self.video.state is not None):
+                    # merge preintegration[self.t1-2] and preintegration[self.t1-3]
+                    for iii in range(len(self.video.state.preintegrations_meas[self.t1-2])):
+                        dd = self.video.state.preintegrations_meas[self.t1-2][iii]
+                        if dd[2] > 0:
+                            self.video.state.preintegrations[self.t1-3].integrateMeasurement(dd[0],\
+                                                                                             dd[1],\
+                                                                                             dd[2])
+                        self.video.state.preintegrations_meas[self.t1-3].append(dd)
 
-                self.video.rm_new_gnss(self.t1-2)
-                self.video.state.wTbs[self.t1-2] = self.video.state.wTbs[self.t1-1]; self.video.state.wTbs.pop()
-                self.video.state.bs  [self.t1-2] = self.video.state.bs  [self.t1-1]; self.video.state.bs.pop()
-                self.video.state.vs  [self.t1-2] = self.video.state.vs  [self.t1-1]; self.video.state.vs .pop()
-                self.video.state.gnss_valid     [self.t1-2] = self.video.state.gnss_valid     [self.t1-1]; self.video.state.gnss_valid .pop()
-                self.video.state.gnss_position  [self.t1-2] = self.video.state.gnss_position  [self.t1-1]; self.video.state.gnss_position .pop()
-                self.video.state.odo_valid      [self.t1-2] = self.video.state.odo_valid      [self.t1-1]; self.video.state.odo_valid .pop()
-                self.video.state.odo_vel        [self.t1-2] = self.video.state.odo_vel        [self.t1-1]; self.video.state.odo_vel .pop()            
+                    self.video.state.preintegrations[self.t1-2] = self.video.state.preintegrations[self.t1-1]
+                    self.video.state.preintegrations_meas[self.t1-2] = self.video.state.preintegrations_meas[self.t1-1]
+                    self.video.state.preintegrations.pop()
+                    self.video.state.preintegrations_meas.pop()
 
-            with self.video.get_lock():
-                self.video.counter.value -= 1
-                self.t1 -= 1
+                    self.video.rm_new_gnss(self.t1-2)
+                    self.video.state.wTbs[self.t1-2] = self.video.state.wTbs[self.t1-1]; self.video.state.wTbs.pop()
+                    self.video.state.bs  [self.t1-2] = self.video.state.bs  [self.t1-1]; self.video.state.bs.pop()
+                    self.video.state.vs  [self.t1-2] = self.video.state.vs  [self.t1-1]; self.video.state.vs .pop()
+                    self.video.state.gnss_valid     [self.t1-2] = self.video.state.gnss_valid     [self.t1-1]; self.video.state.gnss_valid .pop()
+                    self.video.state.gnss_position  [self.t1-2] = self.video.state.gnss_position  [self.t1-1]; self.video.state.gnss_position .pop()
+                    self.video.state.odo_valid      [self.t1-2] = self.video.state.odo_valid      [self.t1-1]; self.video.state.odo_valid .pop()
+                    self.video.state.odo_vel        [self.t1-2] = self.video.state.odo_vel        [self.t1-1]; self.video.state.odo_vel .pop()
+
+                with self.video.get_lock():
+                    self.video.counter.value -= 1
+                    self.t1 -= 1
         else:
-            for itr in range(self.iters2):
-                # print('b%d' % itr)
-                self.graph.update(None, None, use_inactive=True)
+            with self._profile("frontend_update_keyframe_graph_update"):
+                for itr in range(update_iters2):
+                    # print('b%d' % itr)
+                    self.graph.update(None, None, use_inactive=True)
 
             self.new_frame_added = True
             
         ## try initializing VI/GNSS
-        if (not self.visual_only) and self.t1 > self.vi_warmup and self.video.vi_init_t1 < 0:
-            self.init_VI()
-            if not self.visual_only:
-                for i in range(len(self.all_stamp)): # skip to next image
-                    if float(self.all_stamp[i][0]) < cur_t + 1e-6: continue
-                    else:
-                        self.cur_stamp_ii = i
-                        break
-        if self.video.imu_enabled and self.video.gnss_init_time <= 0.0 and len(self.all_gnss)>0:
-            self.init_GNSS()
+        with self._profile("frontend_update_init_checks"):
+            if (not self.visual_only) and self.t1 > self.vi_warmup and self.video.vi_init_t1 < 0:
+                self.init_VI()
+                if not self.visual_only:
+                    for i in range(len(self.all_stamp)): # skip to next image
+                        if float(self.all_stamp[i][0]) < cur_t + 1e-6: continue
+                        else:
+                            self.cur_stamp_ii = i
+                            break
+            if self.video.imu_enabled and self.video.gnss_init_time <= 0.0 and len(self.all_gnss)>0:
+                self.init_GNSS()
 
         
         ## set pose for next itration
-        self.video.poses[self.t1] = self.video.poses[self.t1-1]
-        self.video.disps[self.t1] = self.video.disps[self.t1-1].mean() * 1.0
+        with self._profile("frontend_update_finalize_state"):
+            self.video.poses[self.t1] = self.video.poses[self.t1-1]
+            self.video.disps[self.t1] = self.video.disps[self.t1-1].mean() * 1.0
 
-        self.video.dirty[self.graph.ii.min():self.t1] = True
+            self.video.dirty[self.graph.ii.min():self.t1] = True
 
     def init_IMU(self):
         """ initialize IMU states """

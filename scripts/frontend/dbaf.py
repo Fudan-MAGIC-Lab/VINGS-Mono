@@ -4,8 +4,12 @@ import numpy as np
 from frontend.droid_net import DroidNet
 from frontend.depth_video import DepthVideo
 from frontend.motion_filter import MotionFilter
+from frontend.motion_gate import JetsonMotionGate
+from frontend.droid_cnet_backends import install_droid_cnet_backend
+from frontend.droid_update_backends import install_droid_update_backend
 from frontend.dbaf_frontend import DBAFusionFrontend
 from collections import OrderedDict
+from contextlib import nullcontext
 from torch.multiprocessing import Process
 from lietorch import SE3
 import frontend.geom.projective_ops as pops
@@ -22,6 +26,38 @@ class DBAFusion:
         super(DBAFusion, self).__init__()
         self.cfg = cfg
         self.load_weights(cfg['frontend']['weight']) # load DroidNet weights
+        inference_config = cfg.get('inference', {})
+        self.cnet_backend = install_droid_cnet_backend(
+            self.net, inference_config
+        )
+        if self.cnet_backend is None:
+            self.cnet_backend_status = {
+                'requested_backend': 'torch',
+                'actual_backend': 'torch',
+                'strict': bool(inference_config.get('tensorrt_strict', False)),
+                'engine_path': None,
+                'metadata_path': None,
+                'engine_sha256': None,
+                'fallback_reason': None,
+            }
+        else:
+            self.cnet_backend_status = self.cnet_backend.backend_status()
+        self.update_backend = install_droid_update_backend(
+            self.net.update, inference_config
+        )
+        if self.update_backend is None:
+            self.update_backend_status = {
+                'requested_backend': 'torch',
+                'actual_backend': 'torch',
+                'strict': bool(inference_config.get('tensorrt_strict', False)),
+                'engine_path': None,
+                'metadata_path': None,
+                'engine_sha256': None,
+                'precision': None,
+                'fallback_reason': None,
+            }
+        else:
+            self.update_backend_status = self.update_backend.backend_status()
 
         # store images, depth, poses, intrinsics (shared between processes)
         self.video = DepthVideo(cfg, cfg['frontend']['image_size'], cfg['frontend']['buffer'])
@@ -40,6 +76,8 @@ class DBAFusion:
 
         # filter incoming frames so that there is enough motion
         self.filterx = MotionFilter(self.net, self.video, thresh=cfg['frontend']['filter_thresh'])
+        motion_gate = JetsonMotionGate(cfg)
+        self.motion_gate = motion_gate if motion_gate.enabled else None
         
         # frontend process
         self.frontend = DBAFusionFrontend(self.net, self.video, self.cfg)
@@ -47,6 +85,8 @@ class DBAFusion:
         self.frontend.translation_threshold  = 0.2
         self.frontend.graph.mask_threshold   = -1.0
         self.upsample = True
+        self.profiler = None
+        self.profiler_frame_idx = None
         
         self.dataset_length = None
         
@@ -68,19 +108,74 @@ class DBAFusion:
         self.net.load_state_dict(state_dict)
         self.net.to("cuda:0").eval()
 
+    def set_runtime_profiler(self, profiler):
+        self.profiler = profiler
+        cnet_backend = getattr(self, 'cnet_backend', None)
+        if cnet_backend is None:
+            cnet_status = getattr(self, 'cnet_backend_status', None)
+            if cnet_status is not None and hasattr(profiler, 'set_metadata'):
+                profiler.set_metadata('droid_cnet', cnet_status)
+        else:
+            cnet_backend.set_profiler(profiler)
+        update_backend = getattr(self, 'update_backend', None)
+        if update_backend is None:
+            update_status = getattr(self, 'update_backend_status', None)
+            if update_status is not None and hasattr(profiler, 'set_metadata'):
+                profiler.set_metadata('droid_update', update_status)
+        else:
+            update_backend.set_profiler(profiler)
+        self.filterx.profiler = profiler
+        self.frontend.profiler = profiler
+        self.frontend.graph.profiler = profiler
+        self.net.update.profiler = profiler
+
+    def set_runtime_profiler_frame_idx(self, frame_idx):
+        self.profiler_frame_idx = frame_idx
+        self.filterx.profiler_frame_idx = frame_idx
+        self.frontend.profiler_frame_idx = frame_idx
+        self.frontend.graph.profiler_frame_idx = frame_idx
+        self.net.update.profiler_frame_idx = frame_idx
+
+    def _profile(self, stage):
+        profiler = getattr(self, "profiler", None)
+        if profiler is None:
+            return nullcontext()
+        return profiler.time(stage, getattr(self, "profiler_frame_idx", None))
+
     def track(self, data_packet):
         """ main thread - update map """
         tstamp, image, intrinsic = data_packet['timestamp'], data_packet['rgb'], data_packet['intrinsic']
         with torch.no_grad():
+            motion_gate = getattr(self, "motion_gate", None)
+            if motion_gate is not None:
+                with self._profile("frontend_motion_gate"):
+                    if hasattr(motion_gate, "decide_packet"):
+                        gate_decision = motion_gate.decide_packet(data_packet)
+                    else:
+                        gate_decision = motion_gate.decide(image)
+                video = getattr(self, "video", None)
+                if video is not None:
+                    video.last_motion_gate_score = gate_decision.get("score")
+                    video.last_motion_gate_reason = gate_decision.get("reason")
+                    video.last_motion_gate_backend = gate_decision.get("backend")
+                if gate_decision.get("skip", False):
+                    return
+
             # check there is enough motion
             depth = None if 'depth' not in list(data_packet.keys()) else data_packet['depth']
-            self.filterx.track(tstamp, image, depth, intrinsic)
+            with self._profile("frontend_motion_filter"):
+                self.filterx.track(tstamp, image, depth, intrinsic)
             # local bundle adjustment
-            self.frontend()
+            with self._profile("frontend_dba_update"):
+                self.frontend()
 
     def terminate(self, stream=None):
         """ terminate the visualization process, return poses [t, q] """
         del self.frontend
+        if self.cnet_backend is not None:
+            self.cnet_backend.close()
+        if self.update_backend is not None:
+            self.update_backend.close()
 
     # Tailored for debug Looper.
     def save_pt_ckpt(self, save_path):
@@ -134,4 +229,4 @@ class DBAFusion:
             self.frontend.video.count_save_bias = load_dict['frontend']['video']['count_save_bias']
         
     
-    
+

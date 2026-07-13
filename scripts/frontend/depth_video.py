@@ -108,10 +108,8 @@ class DepthVideo:
         
         ### DBAFusion
         # for .pkl saving
-        if '360' in self.cfg['dataset']['module']:
-            SAVE_BUFFER_SIZE = 8000
-        else:
-            SAVE_BUFFER_SIZE = 2500
+        default_save_buffer_size = 8000 if '360' in self.cfg['dataset']['module'] else 2500
+        SAVE_BUFFER_SIZE = int(self.cfg['frontend'].get('save_buffer_size', default_save_buffer_size))
         
         self.disps_save = torch.ones(SAVE_BUFFER_SIZE, ht//8, wd//8, device="cpu", dtype=torch.float)
         self.poses_save = torch.zeros(SAVE_BUFFER_SIZE, 7, device="cpu", dtype=torch.float)

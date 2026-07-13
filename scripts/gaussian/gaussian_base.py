@@ -13,6 +13,7 @@ from gaussian.general_utils import inverse_sigmoid
 from abc import ABCMeta, abstractmethod
 from gaussian.loss_utils import get_loss, get_pixel_mask, l1_loss
 from gaussian.pixel_budget import make_pixel_mask, select_pixel_budget
+from gaussian.eval_export import append_eval_manifest, should_export_eval_frame
 from gaussian.normal_utils import depth_propagate_normal
 try:
     from gaussian.vis_utils import vis_rgbdnua, load_ply, calc_psnr
@@ -447,18 +448,25 @@ class GaussianBase:
 
             # self.wandber.log_time('Time_PerIter')
 
-            # TTD 2024/12/29 dangerous option.
-            if self.cfg.get('use_vis', False) and curr_iter == train_iters - 1:
-                gt_dict['pose'] = c2w
-                gt_dict['abs_frame_idx_list'] = batch["viz_out_idx_to_f_idx"]
+            if curr_iter == train_iters - 1:
                 frame_id = batch["viz_out_idx_to_f_idx"][curr_id]
-                if 'use_mobile' in self.cfg.keys() and self.cfg['use_mobile']:
-                    self.vis_rgbdnua = vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict, True)
-                else:
-                    vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict)
-                    
-                self.wandber.log_once("num_of_gaussians", self._xyz.shape[0])
-                self.wandber.log_once("psnr", calc_psnr(pred_dict['rgb'], gt_dict['rgb'], gt_dict['depth'].squeeze(0)>0).item())
+                should_save_eval = self.cfg.get('use_vis', False) or should_export_eval_frame(self.cfg, frame_id)
+                if should_save_eval:
+                    gt_dict['pose'] = c2w
+                    gt_dict['abs_frame_idx_list'] = batch["viz_out_idx_to_f_idx"]
+                    if 'use_mobile' in self.cfg.keys() and self.cfg['use_mobile']:
+                        self.vis_rgbdnua = vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict, True)
+                    else:
+                        vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict)
+                    append_eval_manifest(
+                        self.cfg,
+                        frame_id,
+                        f"droid_c2w/{str(frame_id.item()).zfill(8)}.txt",
+                        f"rgbdnua/FrameId={str(frame_id.item()).zfill(5)}.png",
+                    )
+
+                    self.wandber.log_once("num_of_gaussians", self._xyz.shape[0])
+                    self.wandber.log_once("psnr", calc_psnr(pred_dict['rgb'], gt_dict['rgb'], gt_dict['depth'].squeeze(0)>0).item())
             
             self.wandber.log_time('adcs_time')
             self.stablemask_control(curr_iter)

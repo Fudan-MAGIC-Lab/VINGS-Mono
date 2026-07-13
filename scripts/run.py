@@ -27,7 +27,15 @@ parser.add_argument("--frontend-weight", default=None, help="Override frontend.w
 parser.add_argument("--device-tracker", default=None, help="Override device.tracker in the config")
 parser.add_argument("--device-mapper", default=None, help="Override device.mapper in the config")
 parser.add_argument("--frontend-buffer", type=int, default=None, help="Override frontend.buffer to control memory usage")
+parser.add_argument("--frontend-save-buffer", type=int, default=None, help="Override frontend CPU save buffer size")
 parser.add_argument("--frontend-image-size", default=None, help="Override frontend.image_size as H,W (e.g. 256,448)")
+parser.add_argument("--frontend-iters1", type=int, default=None, help="Override frontend non-keyframe graph update iterations")
+parser.add_argument("--frontend-iters2", type=int, default=None, help="Override frontend keyframe graph update iterations")
+parser.add_argument("--frontend-adaptive-iters", action="store_true", help="Enable motion-aware frontend graph update iterations")
+parser.add_argument("--frontend-iters1-high", type=int, default=None, help="High-motion frontend non-keyframe graph update iterations")
+parser.add_argument("--frontend-iters2-high", type=int, default=None, help="High-motion frontend keyframe graph update iterations")
+parser.add_argument("--frontend-iters-high-motion-ratio", type=float, default=None, help="Use high frontend iterations when motion exceeds this multiple of the motion threshold")
+parser.add_argument("--frontend-iters-force-interval", type=int, default=None, help="Force high frontend iterations every N update calls when adaptive iterations are enabled")
 parser.add_argument("--lightglue-weight-dir", default=None, help="Override looper.lightglue_weight_dir")
 parser.add_argument("--training-iters", type=int, default=None, help="Override training_args.iters to reduce mapper workload")
 parser.add_argument("--loop-onnx-provider", choices=["cpu", "cuda"], default=None, help="Override loop ONNX Runtime provider")
@@ -44,10 +52,27 @@ parser.add_argument("--metric-depth-keyframe-min-interval", type=int, default=No
 parser.add_argument("--metric-depth-keyframe-force-interval", type=int, default=None, help="Force a metric depth prediction after this many keyframe frames without depth")
 parser.add_argument("--metric-depth-high-motion-ratio", type=float, default=None, help="Predict metric depth early when keyframe motion exceeds this multiple of the frontend threshold")
 parser.add_argument("--metric-depth-scale", type=float, default=None, help="Scale Metric3D internal forward crop size; depth output stays at the original image size")
+parser.add_argument("--metric-depth-backend", choices=["torch", "tensorrt"], default=None, help="Metric3D inference backend")
+parser.add_argument("--metric-depth-engine", default=None, help="TensorRT plan path for Metric3D depth inference")
+parser.add_argument("--droid-cnet-backend", choices=["torch", "tensorrt"], default=None, help="DROID context encoder inference backend")
+parser.add_argument("--droid-cnet-engine", default=None, help="TensorRT plan path for the DROID context encoder")
+parser.add_argument("--droid-update-backend", choices=["torch", "tensorrt"], default=None, help="DROID update-core inference backend")
+parser.add_argument("--droid-update-engine", default=None, help="TensorRT plan path for the DROID update core")
+parser.add_argument("--tensorrt-strict", action="store_true", help="Fail instead of falling back when a requested TensorRT backend fails")
 parser.add_argument("--no-vis", action="store_true", help="Force headless execution by disabling visualization")
 parser.add_argument("--disable-loop", action="store_true", help="Disable loop closure to bypass optional loop dependencies")
 parser.add_argument("--disable-metric", action="store_true", help="Disable metric depth inference")
 parser.add_argument("--skip-save-ply", action="store_true", help="Skip final ply export to reduce optional dependency requirements")
+parser.add_argument("--export-eval", action="store_true", help="Save lightweight keyframe pose/rgbdnua evaluation outputs without enabling online map visualization")
+parser.add_argument("--export-eval-interval", type=int, default=None, help="Save lightweight evaluation outputs every N frame ids when --export-eval is enabled")
+parser.add_argument("--enable-jetson-motion-gate", action="store_true", help="Use a low-cost Jetson motion gate before DROID motion filtering/DBA")
+parser.add_argument("--motion-gate-backend", choices=["auto", "vpi_nvbuffer", "vpi_cpp", "vpi", "opencv"], default=None, help="Motion gate backend; auto tries VPI first and falls back to OpenCV")
+parser.add_argument("--motion-gate-threshold", type=float, default=None, help="Optical-flow motion threshold for running full tracking")
+parser.add_argument("--motion-gate-force-interval", type=int, default=None, help="Run full tracking at least every N input frames when motion gate is enabled")
+parser.add_argument("--motion-gate-resize", default=None, help="Motion gate grayscale resize as H,W, e.g. 96,160")
+parser.add_argument("--motion-gate-grid-size", type=int, default=None, help="VPI/OpenCV motion gate output grid size")
+parser.add_argument("--motion-gate-vpi-levels", type=int, default=None, help="Number of VPI OFA pyramid levels; 1 is fastest and most robust")
+parser.add_argument("--motion-gate-vpi-quality", choices=["low", "medium", "high"], default=None, help="VPI OFA optical-flow quality")
 args = parser.parse_args()
 config_path = args.config
 from gaussian.general_utils import load_config, get_name
@@ -72,6 +97,9 @@ def apply_overrides(cfg):
     cfg.setdefault('profiling', {})
     cfg['profiling'].setdefault('runtime', {})
     cfg.setdefault('metric_depth_schedule', {})
+    cfg.setdefault('inference', {})
+    cfg.setdefault('eval_export', {})
+    cfg.setdefault('jetson_motion_gate', {})
 
     if args.dataset_root is not None:
         cfg['dataset']['root'] = args.dataset_root
@@ -85,12 +113,28 @@ def apply_overrides(cfg):
         cfg['device']['mapper'] = args.device_mapper
     if args.frontend_buffer is not None:
         cfg['frontend']['buffer'] = int(args.frontend_buffer)
+    if args.frontend_save_buffer is not None:
+        cfg['frontend']['save_buffer_size'] = int(args.frontend_save_buffer)
     if args.frontend_image_size is not None:
         try:
             h_str, w_str = [x.strip() for x in args.frontend_image_size.split(',')]
             cfg['frontend']['image_size'] = [int(h_str), int(w_str)]
         except Exception as exc:
             raise ValueError("--frontend-image-size must be in H,W format, e.g. 256,448") from exc
+    if args.frontend_iters1 is not None:
+        cfg['frontend']['iters1'] = int(args.frontend_iters1)
+    if args.frontend_iters2 is not None:
+        cfg['frontend']['iters2'] = int(args.frontend_iters2)
+    if args.frontend_adaptive_iters:
+        cfg['frontend']['adaptive_iters_enabled'] = True
+    if args.frontend_iters1_high is not None:
+        cfg['frontend']['iters1_high'] = int(args.frontend_iters1_high)
+    if args.frontend_iters2_high is not None:
+        cfg['frontend']['iters2_high'] = int(args.frontend_iters2_high)
+    if args.frontend_iters_high_motion_ratio is not None:
+        cfg['frontend']['iters_high_motion_ratio'] = float(args.frontend_iters_high_motion_ratio)
+    if args.frontend_iters_force_interval is not None:
+        cfg['frontend']['iters_force_interval'] = int(args.frontend_iters_force_interval)
     if args.lightglue_weight_dir is not None:
         cfg['looper']['lightglue_weight_dir'] = args.lightglue_weight_dir
     if args.training_iters is not None:
@@ -124,6 +168,20 @@ def apply_overrides(cfg):
         cfg['metric_depth_schedule']['high_motion_ratio'] = float(args.metric_depth_high_motion_ratio)
     if args.metric_depth_scale is not None:
         cfg['metric_depth_scale'] = float(args.metric_depth_scale)
+    if args.metric_depth_backend is not None:
+        cfg['inference']['metric3d_backend'] = args.metric_depth_backend
+    if args.metric_depth_engine is not None:
+        cfg['inference']['metric3d_engine'] = args.metric_depth_engine
+    if args.droid_cnet_backend is not None:
+        cfg['inference']['droid_cnet_backend'] = args.droid_cnet_backend
+    if args.droid_cnet_engine is not None:
+        cfg['inference']['droid_cnet_engine'] = args.droid_cnet_engine
+    if args.droid_update_backend is not None:
+        cfg['inference']['droid_update_backend'] = args.droid_update_backend
+    if args.droid_update_engine is not None:
+        cfg['inference']['droid_update_engine'] = args.droid_update_engine
+    if args.tensorrt_strict:
+        cfg['inference']['tensorrt_strict'] = True
     if args.no_vis:
         cfg['use_vis'] = False
     if args.disable_loop:
@@ -132,6 +190,27 @@ def apply_overrides(cfg):
         cfg['use_metric'] = False
     if args.skip_save_ply:
         cfg['skip_save_ply'] = True
+    if args.export_eval:
+        cfg['eval_export']['enabled'] = True
+    if args.export_eval_interval is not None:
+        cfg['eval_export']['interval'] = int(args.export_eval_interval)
+    if args.enable_jetson_motion_gate:
+        cfg['jetson_motion_gate']['enabled'] = True
+    if args.motion_gate_backend is not None:
+        cfg['jetson_motion_gate']['backend'] = args.motion_gate_backend
+    if args.motion_gate_threshold is not None:
+        cfg['jetson_motion_gate']['threshold'] = float(args.motion_gate_threshold)
+    if args.motion_gate_force_interval is not None:
+        cfg['jetson_motion_gate']['force_interval'] = int(args.motion_gate_force_interval)
+    if args.motion_gate_resize is not None:
+        h_str, w_str = [part.strip() for part in args.motion_gate_resize.split(',')]
+        cfg['jetson_motion_gate']['resize'] = [int(h_str), int(w_str)]
+    if args.motion_gate_grid_size is not None:
+        cfg['jetson_motion_gate']['grid_size'] = int(args.motion_gate_grid_size)
+    if args.motion_gate_vpi_levels is not None:
+        cfg['jetson_motion_gate']['vpi_num_levels'] = int(args.motion_gate_vpi_levels)
+    if args.motion_gate_vpi_quality is not None:
+        cfg['jetson_motion_gate']['vpi_quality'] = args.motion_gate_vpi_quality
     return cfg
 
 
@@ -211,6 +290,12 @@ class Runner:
         self.runtime_budget = RuntimeBudgetController(cfg, dataset_length=len(self.dataset))
         self._last_runtime_budget_stage = None
         self.profiler = RuntimeProfiler.from_config(cfg, sync_callback=sync_cuda_if_available)
+        if hasattr(self, "metric_predictor"):
+            self.profiler.set_metadata(
+                "metric_depth", self.metric_predictor.backend_status()
+            )
+        if hasattr(self.tracker, "set_runtime_profiler"):
+            self.tracker.set_runtime_profiler(self.profiler)
         self.metric_depth_scheduler = MetricDepthScheduler(cfg)
 
     def _get_gaussian_count(self):
@@ -266,11 +351,15 @@ class Runner:
                     self.metric_depth_scheduler.record(metric_decision)
                     if metric_decision["should_predict"]:
                         with self.profiler.time("metric_depth", idx):
-                            data_packet['depth'] = self.metric_predictor.predict(data_packet['rgb'][0])
+                            data_packet['depth'] = self.metric_predictor.predict(
+                                data_packet['rgb'][0], profiler=self.profiler, frame_idx=idx
+                            )
                     elif metric_decision["reason"] == "keyframe_lazy":
                         def predict_metric_depth():
                             with self.profiler.time("metric_depth", idx):
-                                return self.metric_predictor.predict(data_packet['rgb'][0])
+                                return self.metric_predictor.predict(
+                                    data_packet['rgb'][0], profiler=self.profiler, frame_idx=idx
+                                )
                         data_packet['depth'] = self.metric_depth_scheduler.make_lazy_depth_provider(predict_metric_depth, frame_idx=idx)
                     elif metric_decision["reason"] == "scheduled_skip":
                         data_packet.pop('depth', None)
@@ -280,6 +369,8 @@ class Runner:
                     self.tracker.frontend.all_stamp = self.dataset.preload_camtimestamp()
 
                 # torch.set_grad_enabled(False)
+                if hasattr(self.tracker, "set_runtime_profiler_frame_idx"):
+                    self.tracker.set_runtime_profiler_frame_idx(idx)
                 with self.profiler.time("tracking", idx):
                     self.tracker.track(data_packet if not self.cfg['mode']=='vo_nerfslam' else datapacket_to_nerfslam(data_packet, idx))
                 # torch.set_grad_enabled(True)
@@ -331,6 +422,9 @@ class Runner:
                         self.save_ply_fn(self.mapper, idx, save_mode='2dgs')
                     # save_ply(self.mapper, idx, save_mode='pth')
 
+        motion_gate = getattr(self.tracker, 'motion_gate', None)
+        if motion_gate is not None:
+            motion_gate.maybe_log_summary()
         self.metric_depth_scheduler.maybe_log_summary()
         self.profiler.write_reports()
             

@@ -2,12 +2,17 @@ import pathlib
 import sys
 import types
 import unittest
+from contextlib import contextmanager
 from unittest import mock
 
 import torch
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.modules.setdefault("lietorch", types.SimpleNamespace(SE3=None, SO3=None, Sim3=None))
+sys.modules.setdefault("droid_backends", types.SimpleNamespace())
+sys.modules.setdefault("frontend.droid_net", types.SimpleNamespace(DroidNet=object))
+sys.modules.pop("frontend.motion_filter", None)
 
 from frontend.motion_filter import MotionFilter
 
@@ -28,6 +33,16 @@ class FakeVideo:
         self.counter.value += 1
 
 
+class RecordingProfiler:
+    def __init__(self):
+        self.stages = []
+
+    @contextmanager
+    def time(self, stage, frame_idx=None):
+        self.stages.append((stage, frame_idx))
+        yield
+
+
 class MotionFilterLazyDepthTests(unittest.TestCase):
     def make_filter(self, counter_value, motion_value):
         filt = MotionFilter.__new__(MotionFilter)
@@ -41,6 +56,8 @@ class MotionFilterLazyDepthTests(unittest.TestCase):
         filt.inp = torch.zeros(1, 1, 1, 1)
         filt.fmap = torch.zeros(1, 1, 1, 1)
         filt._motion_value = motion_value
+        filt.profiler = None
+        filt.profiler_frame_idx = None
         return filt
 
     def patch_filter_ops(self):
@@ -98,6 +115,9 @@ class MotionFilterLazyDepthTests(unittest.TestCase):
 
         self.assertEqual(filt.video.appended_depths, ["depth"])
         self.assertEqual(contexts, [{"motion_score": 6.0, "motion_threshold": 2.5}])
+        self.assertEqual(filt.video.last_motion_score, 6.0)
+        self.assertEqual(filt.video.last_motion_threshold, 2.5)
+        self.assertTrue(filt.video.last_motion_added_keyframe)
 
     def test_non_keyframe_does_not_realize_lazy_depth(self):
         calls = []
@@ -105,6 +125,46 @@ class MotionFilterLazyDepthTests(unittest.TestCase):
         self.run_track(filt, lambda: calls.append("predict") or "depth")
         self.assertEqual(calls, [])
         self.assertEqual(filt.video.appended_depths, [])
+        self.assertEqual(filt.video.last_motion_score, 1.0)
+        self.assertEqual(filt.video.last_motion_threshold, 2.5)
+        self.assertFalse(filt.video.last_motion_added_keyframe)
+
+    def test_initial_frame_records_feature_context_append_and_lazy_depth_stages(self):
+        profiler = RecordingProfiler()
+        filt = self.make_filter(counter_value=0, motion_value=0.0)
+        filt.profiler = profiler
+        filt.profiler_frame_idx = 11
+
+        self.run_track(filt, lambda: "depth")
+
+        self.assertEqual(
+            profiler.stages,
+            [
+                ("motion_filter_feature_encoder", 11),
+                ("motion_filter_context_encoder", 11),
+                ("lazy_metric_depth_inside_tracking", 11),
+                ("motion_filter_append", 11),
+            ],
+        )
+
+    def test_motion_keyframe_records_corr_update_context_append_and_lazy_depth_stages(self):
+        profiler = RecordingProfiler()
+        filt = self.make_filter(counter_value=1, motion_value=3.0)
+        filt.profiler = profiler
+        filt.profiler_frame_idx = 12
+
+        self.run_track(filt, lambda: "depth")
+
+        self.assertEqual(
+            profiler.stages,
+            [
+                ("motion_filter_feature_encoder", 12),
+                ("motion_filter_corr_update", 12),
+                ("motion_filter_context_encoder", 12),
+                ("lazy_metric_depth_inside_tracking", 12),
+                ("motion_filter_append", 12),
+            ],
+        )
 
 
 if __name__ == "__main__":
