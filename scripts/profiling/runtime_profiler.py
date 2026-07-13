@@ -1,4 +1,5 @@
 import csv
+import json
 import time
 from collections import defaultdict
 from contextlib import contextmanager
@@ -12,6 +13,7 @@ class RuntimeProfiler:
         self.clock = clock or time.perf_counter
         self.sync_callback = sync_callback
         self.events = []
+        self.metadata = {}
 
     @classmethod
     def from_config(cls, cfg, sync_callback=None):
@@ -51,6 +53,11 @@ class RuntimeProfiler:
             }
         )
 
+    def set_metadata(self, key, value):
+        if not self.enabled:
+            return
+        self.metadata[str(key)] = value
+
     def summary_rows(self):
         grouped = defaultdict(list)
         for event in self.events:
@@ -81,6 +88,10 @@ class RuntimeProfiler:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         summary_rows = self.summary_rows()
+
+        with (self.output_dir / "runtime_profile_metadata.json").open("w") as handle:
+            json.dump(self.metadata, handle, indent=2, sort_keys=True)
+            handle.write("\n")
 
         with (self.output_dir / "runtime_profile.csv").open("w", newline="") as handle:
             writer = csv.DictWriter(

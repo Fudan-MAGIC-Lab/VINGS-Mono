@@ -1,4 +1,5 @@
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,6 +64,46 @@ class RuntimeProfilerTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual(rows[0]["stage"], "frame_total")
             self.assertIn("| mapping |", summary_md.read_text())
+
+    def test_write_reports_includes_mutable_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            profiler = RuntimeProfiler(enabled=True, output_dir=output_dir)
+            profiler.set_metadata(
+                "metric_depth",
+                {
+                    "requested_backend": "tensorrt",
+                    "actual_backend": "tensorrt",
+                    "strict": False,
+                    "fallback_reason": None,
+                },
+            )
+            profiler.set_metadata(
+                "metric_depth",
+                {
+                    "requested_backend": "tensorrt",
+                    "actual_backend": "torch",
+                    "strict": False,
+                    "fallback_reason": "engine load failed",
+                },
+            )
+
+            profiler.write_reports()
+
+            metadata = json.loads(
+                (output_dir / "runtime_profile_metadata.json").read_text()
+            )
+            self.assertEqual(
+                metadata,
+                {
+                    "metric_depth": {
+                        "requested_backend": "tensorrt",
+                        "actual_backend": "torch",
+                        "strict": False,
+                        "fallback_reason": "engine load failed",
+                    }
+                },
+            )
 
 
 if __name__ == "__main__":

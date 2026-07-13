@@ -180,10 +180,7 @@ class BasicEncoder(nn.Module):
         self.in_planes = dim
         return nn.Sequential(*layers)
 
-    def forward(self, x):
-        b, n, c1, h1, w1 = x.shape
-        x = x.view(b*n, c1, h1, w1)
-
+    def forward_core(self, x):
         x = self.conv1(x)
         x = self.norm1(x)
         x = self.relu1(x)
@@ -192,7 +189,11 @@ class BasicEncoder(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
 
-        x = self.conv2(x)
+        return self.conv2(x)
+
+    def forward(self, x):
+        b, n, c1, h1, w1 = x.shape
+        x = self.forward_core(x.view(b*n, c1, h1, w1))
 
         _, c2, h2, w2 = x.shape
         return x.view(b, n, c2, h2, w2)

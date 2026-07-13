@@ -4,6 +4,14 @@ use_dynamic: False
 use_pose_refine: False
 use_metric: True
 metric_depth_scale: 1.0
+inference:
+  metric3d_backend: torch
+  metric3d_engine: null
+  droid_cnet_backend: torch
+  droid_cnet_engine: null
+  droid_update_backend: torch
+  droid_update_engine: null
+  tensorrt_strict: false
 debug_mode: False
 
 mode: 'vo' # 'vo' or 'vio'

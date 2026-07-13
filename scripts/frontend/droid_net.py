@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import OrderedDict
+from contextlib import nullcontext
 from frontend.modules.extractor import BasicEncoder
 from frontend.modules.corr import CorrBlock
 from frontend.modules.gru import ConvGRU
@@ -110,6 +111,27 @@ class UpdateModule(nn.Module):
 
         self.gru = ConvGRU(128, 128+128+64)
         self.agg = GraphAgg()
+        self.core_backend = None
+        self.profiler = None
+        self.profiler_frame_idx = None
+
+    def _profile(self, stage):
+        if self.profiler is None:
+            return nullcontext()
+        return self.profiler.time(stage, self.profiler_frame_idx)
+
+    def forward_core_torch(self, net, inp, corr, flow):
+        corr = self.corr_encoder(corr)
+        flow = self.flow_encoder(flow)
+        net = self.gru(net, inp, corr, flow)
+        delta = self.delta(net)
+        weight = self.weight(net)
+        return net, delta, weight
+
+    def forward_core(self, net, inp, corr, flow):
+        if self.core_backend is not None:
+            return self.core_backend(net, inp, corr, flow)
+        return self.forward_core_torch(net, inp, corr, flow)
 
     def forward(self, net, inp, corr, flow=None, ii=None, jj=None, upsample = False):
         """ RaftSLAM update operator """
@@ -123,13 +145,10 @@ class UpdateModule(nn.Module):
         corr = corr.view(batch*num, -1, ht, wd) 
         flow = flow.view(batch*num, -1, ht, wd) 
 
-        corr = self.corr_encoder(corr)
-        flow = self.flow_encoder(flow)
-        net = self.gru(net, inp, corr, flow)
-
-        ### update variables ###
-        delta = self.delta(net).view(*output_dim)
-        weight = self.weight(net).view(*output_dim)
+        with self._profile("covisible_graph_update_op"):
+            net, delta, weight = self.forward_core(net, inp, corr, flow)
+        delta = delta.view(*output_dim)
+        weight = weight.view(*output_dim)
 
         delta = delta.permute(0,1,3,4,2)[...,:2].contiguous()
         weight = weight.permute(0,1,3,4,2)[...,:2].contiguous()
@@ -141,7 +160,8 @@ class UpdateModule(nn.Module):
             # We found this useless for VIO performance, thus disable it to save computation.
             # Feel free to re-enable it.
             if upsample:
-                eta, upmask = self.agg(net, ii.to(net.device))
+                with self._profile("covisible_graph_graph_agg"):
+                    eta, upmask = self.agg(net, ii.to(net.device))
                 return net, delta, weight, eta, upmask
             else:
                 return net, delta, weight, None, None
