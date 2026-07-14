@@ -105,6 +105,37 @@ class RuntimeProfilerTests(unittest.TestCase):
                 },
             )
 
+    def test_write_reports_includes_structured_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            profiler = RuntimeProfiler(enabled=True, output_dir=output_dir)
+
+            profiler.record_detail(
+                "dba_signature",
+                {"active_edges": 12, "feature_shape": [43, 77]},
+                frame_idx=9,
+            )
+            profiler.write_reports()
+
+            detail_path = output_dir / "runtime_profile_details.jsonl"
+            rows = [
+                json.loads(line)
+                for line in detail_path.read_text().splitlines()
+            ]
+            self.assertEqual(
+                rows,
+                [
+                    {
+                        "frame_idx": 9,
+                        "kind": "dba_signature",
+                        "payload": {
+                            "active_edges": 12,
+                            "feature_shape": [43, 77],
+                        },
+                    }
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

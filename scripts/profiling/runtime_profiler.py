@@ -13,6 +13,7 @@ class RuntimeProfiler:
         self.clock = clock or time.perf_counter
         self.sync_callback = sync_callback
         self.events = []
+        self.details = []
         self.metadata = {}
 
     @classmethod
@@ -58,6 +59,17 @@ class RuntimeProfiler:
             return
         self.metadata[str(key)] = value
 
+    def record_detail(self, kind, payload, frame_idx=None):
+        if not self.enabled:
+            return
+        self.details.append(
+            {
+                "kind": str(kind),
+                "frame_idx": frame_idx,
+                "payload": dict(payload),
+            }
+        )
+
     def summary_rows(self):
         grouped = defaultdict(list)
         for event in self.events:
@@ -92,6 +104,10 @@ class RuntimeProfiler:
         with (self.output_dir / "runtime_profile_metadata.json").open("w") as handle:
             json.dump(self.metadata, handle, indent=2, sort_keys=True)
             handle.write("\n")
+
+        with (self.output_dir / "runtime_profile_details.jsonl").open("w") as handle:
+            for detail in self.details:
+                handle.write(json.dumps(detail, sort_keys=True) + "\n")
 
         with (self.output_dir / "runtime_profile.csv").open("w", newline="") as handle:
             writer = csv.DictWriter(
