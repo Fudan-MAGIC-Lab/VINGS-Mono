@@ -97,6 +97,12 @@ The first `N` occurrences of each key are sampled. Counts are local to a run and
 are recorded in profiler metadata. This deterministic rule ensures rare shapes
 are observed while bounding synchronization overhead.
 
+The exact key is previewed immediately before correlation sampling using only
+the already available active/inactive index tensors and `t0/t1`. The preview
+does not assemble or mutate target/weight tensors. After the normal eager path
+constructs its final BA inputs, the previewed key must equal the recorded call
+signature; a mismatch fails the evidence run.
+
 ### Measurements
 
 Every sampled update synchronizes the tracker device before each snapshot and
@@ -193,6 +199,12 @@ The calibration artifact includes:
 The corrected estimate is:
 
 `persistent shadow bytes for the selected boundary + calibrated transient peak bytes + safety margin`.
+
+For validation, the measured target before safety margin is the analytical
+persistent-shadow bytes for that boundary plus the measured eager transient
+peak. Accuracy metrics compare the pre-margin modeled value to that target.
+The no-underprediction gate compares the final value after safety margin to the
+same target. This prevents the fixed margin from mechanically inflating MAPE.
 
 For `corr_update_aggregation`, persistent shadow bytes include the exact
 capacity formula for the full four-level correlation pyramid. For
@@ -294,8 +306,10 @@ one representative synthetic `43x77` signature before full evidence runs.
 ## Completion Gate
 
 Phase 0.5 is complete when the instrumentation and calibration tests pass, both
-Jetson evidence runs finish, calibration validates, and both revised manifests
-and the decision report are committed.
+Jetson evidence runs finish, and the calibration artifacts and decision report
+are committed. Revised manifests are required only for boundaries whose
+calibration validates; an invalid calibration is itself sufficient NO-GO
+evidence and must not be forced through the planner.
 
 Phase 1 may be reconsidered only if the `update_aggregation_only` boundary
 achieves at least 90% observed-call coverage with at most six buckets, each
