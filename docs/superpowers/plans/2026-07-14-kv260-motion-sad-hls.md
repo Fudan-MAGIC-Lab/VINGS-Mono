@@ -4,9 +4,11 @@
 
 **Goal:** Build and verify a Vitis HLS 2023.1 accelerator that reduces paired 320x180 grayscale frames to scalar SAD and changed-pixel motion signals.
 
-**Architecture:** A fixed-length AXI4-Stream carries one previous/current 8-bit pixel pair per word. One pipelined loop accumulates absolute differences, counts differences above an AXI4-Lite threshold, and validates TLAST; a self-checking C++ testbench runs before K26 synthesis.
+**Architecture:** A bounded AXI4-Stream transaction carries one previous/current 8-bit pixel pair per word. One pipelined loop accumulates absolute differences, counts differences above an AXI4-Lite threshold, and validates TLAST/TKEEP/TSTRB; a self-checking C++ testbench runs before K26 synthesis.
 
-**Tech Stack:** Vitis HLS 2023.1, synthesizable C++14, `hls::stream`, `ap_axiu`, Tcl, K26 part `xck26-sfvc784-2LV-c`.
+**Tech Stack:** Vitis HLS 2023.1, synthesizable C++14, `hls::stream`, `ap_axiu`, Tcl, PowerShell, K26 part `xck26-sfvc784-2LV-c`.
+
+**Status:** Completed on 2026-07-14. Review hardening added early-TLAST packet preservation, byte-qualifier validation, stale-report invalidation, and unique local staging cleanup.
 
 ---
 
@@ -16,6 +18,7 @@
 - `fpga/hls/motion_sad/src/motion_sad.cpp`: synthesizable datapath and HLS interfaces.
 - `fpga/hls/motion_sad/tb/test_motion_sad.cpp`: self-checking behavioral and TLAST tests.
 - `fpga/hls/motion_sad/run_hls.tcl`: repeatable C simulation and synthesis flow.
+- `fpga/hls/motion_sad/run_hls.ps1`: checked Windows wrapper and unique staging lifecycle.
 - `fpga/hls/motion_sad/.gitignore`: generated project exclusion.
 - `fpga/hls/motion_sad/README.md`: commands and interface documentation.
 
@@ -28,7 +31,7 @@
 - Create: `fpga/hls/motion_sad/run_hls.tcl`
 - Create: `fpga/hls/motion_sad/.gitignore`
 
-- [ ] **Step 1: Create the public interface**
+- [x] **Step 1: Create the public interface**
 
 ```cpp
 #ifndef MOTION_SAD_ACCEL_HPP
@@ -54,7 +57,7 @@ void motion_sad(
 #endif
 ```
 
-- [ ] **Step 2: Add a compilable red-phase stub**
+- [x] **Step 2: Add a compilable red-phase stub**
 
 ```cpp
 #include "motion_sad_accel.hpp"
@@ -75,7 +78,7 @@ void motion_sad(
 }
 ```
 
-- [ ] **Step 3: Add the self-checking testbench**
+- [x] **Step 3: Add the self-checking testbench**
 
 ```cpp
 #include "motion_sad_accel.hpp"
@@ -198,78 +201,30 @@ int main() {
 }
 ```
 
-- [ ] **Step 4: Add the HLS script and ignore generated output**
+The final review-expanded testbench also covers reverse maximum difference,
+an early-TLAST packet followed by a complete packet, and invalid TKEEP/TSTRB.
+The snippet above records the initial red phase; the checked-in testbench is
+the authoritative final version.
 
-```tcl
-set source_dir [file dirname [file normalize [info script]]]
-set run_synthesis [expr {
-    [info exists ::env(MOTION_SAD_SYNTH)] &&
-    $::env(MOTION_SAD_SYNTH) eq "1"
-}]
+- [x] **Step 4: Add the HLS script and ignore generated output**
 
-if {[info exists ::env(LOCALAPPDATA)]} {
-    set local_root $::env(LOCALAPPDATA)
-} elseif {[info exists ::env(TEMP)]} {
-    set local_root $::env(TEMP)
-} else {
-    error "LOCALAPPDATA or TEMP is required for the local HLS staging area"
-}
-
-set stage_dir [file join $local_root VINGS-Mono hls motion_sad_2023_1]
-file delete -force $stage_dir
-foreach relative_path {
-    include/motion_sad_accel.hpp
-    src/motion_sad.cpp
-    tb/test_motion_sad.cpp
-} {
-    set source_path [file join $source_dir $relative_path]
-    set stage_path [file join $stage_dir $relative_path]
-    file mkdir [file dirname $stage_path]
-    file copy -force $source_path $stage_path
-}
-
-set build_dir [file join $stage_dir build]
-file mkdir $build_dir
-cd $build_dir
-open_project -reset motion_sad_prj
-set_top motion_sad
-add_files [file join $stage_dir src motion_sad.cpp] \
-    -cflags "-I[file join $stage_dir include] -std=c++14"
-add_files -tb [file join $stage_dir tb test_motion_sad.cpp] \
-    -cflags "-I[file join $stage_dir include] -std=c++14"
-open_solution -reset solution1
-set_part {xck26-sfvc784-2LV-c}
-create_clock -period 10 -name default
-csim_design -clean
-
-set project_dir [file join $build_dir motion_sad_prj]
-set report_dir [file join $source_dir build motion_sad_prj solution1]
-file mkdir [file join $report_dir csim report]
-file copy -force \
-    [file join $project_dir solution1 csim report motion_sad_csim.log] \
-    [file join $report_dir csim report motion_sad_csim.log]
-
-if {$run_synthesis} {
-    csynth_design
-    file mkdir [file join $report_dir syn report]
-    file copy -force \
-        [file join $project_dir solution1 syn report motion_sad_csynth.rpt] \
-        [file join $report_dir syn report motion_sad_csynth.rpt]
-}
-exit
-```
+The final `run_hls.tcl` stages inputs on local NTFS, removes old copied
+reports before a run, and copies new reports atomically. `run_hls.ps1`
+provides each invocation with a unique staging directory, checks both process
+status and Vitis `ERROR:` output, and removes the stage only after Vitis exits.
 
 ```gitignore
 build/
+vitis_hls.log
 ```
 
-- [ ] **Step 5: Run C simulation and verify the red phase**
+- [x] **Step 5: Run C simulation and verify the red phase**
 
 ```powershell
-& 'D:\xilinx\Vitis_HLS\2023.1\bin\vitis_hls.bat' -f run_hls.tcl
+.\run_hls.ps1
 ```
 
-Expected: nonzero exit. Uniform, threshold, sparse, early-TLAST, and missing-TLAST assertions fail, proving the testbench detects the stub.
+Expected: nonzero exit. Uniform, threshold, sparse, early-TLAST, and missing-TLAST assertions fail, proving the testbench detects the stub. The later review red phase also proved that the old implementation consumed the next packet and ignored invalid byte qualifiers.
 
 ### Task 2: Implement the pipelined SAD datapath
 
@@ -277,7 +232,7 @@ Expected: nonzero exit. Uniform, threshold, sparse, early-TLAST, and missing-TLA
 - Modify: `fpga/hls/motion_sad/src/motion_sad.cpp`
 - Test: `fpga/hls/motion_sad/tb/test_motion_sad.cpp`
 
-- [ ] **Step 1: Replace the stub with the synthesizable implementation**
+- [x] **Step 1: Replace the stub with the synthesizable implementation**
 
 ```cpp
 #include "motion_sad_accel.hpp"
@@ -307,13 +262,17 @@ void motion_sad(
         const ap_uint<8> difference =
             current >= previous ? current - previous : previous - current;
         const bool expected_last = i == MOTION_FRAME_PIXELS - 1;
+        const bool received_last = static_cast<bool>(word.last);
 
         sad_accumulator += difference;
         if (difference > change_threshold) {
             ++changed_accumulator;
         }
-        if (static_cast<bool>(word.last) != expected_last) {
+        if (received_last != expected_last || word.keep != 3 || word.strb != 3) {
             error = 1;
+        }
+        if (received_last) {
+            break;
         }
     }
 
@@ -323,15 +282,15 @@ void motion_sad(
 }
 ```
 
-- [ ] **Step 2: Run C simulation and verify the green phase**
+- [x] **Step 2: Run C simulation and verify the green phase**
 
 ```powershell
-& 'D:\xilinx\Vitis_HLS\2023.1\bin\vitis_hls.bat' -f run_hls.tcl
+.\run_hls.ps1
 ```
 
 Expected: exit 0, `All motion_sad tests passed`, and `CSim done with 0 errors`.
 
-- [ ] **Step 3: Commit the tested accelerator**
+- [x] **Step 3: Commit the tested accelerator**
 
 ```powershell
 git add fpga/hls/motion_sad/include/motion_sad_accel.hpp fpga/hls/motion_sad/src/motion_sad.cpp fpga/hls/motion_sad/tb/test_motion_sad.cpp fpga/hls/motion_sad/run_hls.tcl fpga/hls/motion_sad/.gitignore
@@ -344,17 +303,15 @@ git commit -m "feat: add KV260 motion SAD HLS core"
 - Create: `fpga/hls/motion_sad/README.md`
 - Inspect: `fpga/hls/motion_sad/build/motion_sad_prj/solution1/syn/report/motion_sad_csynth.rpt`
 
-- [ ] **Step 1: Run C simulation and C synthesis**
+- [x] **Step 1: Run C simulation and C synthesis**
 
 ```powershell
-$env:MOTION_SAD_SYNTH = '1'
-& 'D:\xilinx\Vitis_HLS\2023.1\bin\vitis_hls.bat' -f run_hls.tcl
-Remove-Item Env:MOTION_SAD_SYNTH
+.\run_hls.ps1 -Synthesize
 ```
 
 Expected: exit 0, passing C simulation, and a report for `xck26-sfvc784-2LV-c` with a 10 ns target clock.
 
-- [ ] **Step 2: Verify pipeline, timing, and resources**
+- [x] **Step 2: Verify pipeline, timing, and resources**
 
 ```powershell
 $report = 'build\motion_sad_prj\solution1\syn\report\motion_sad_csynth.rpt'
@@ -363,7 +320,7 @@ Select-String -Path $report -Pattern 'Timing|Latency|Interval|PIPELINE|DSP|BRAM|
 
 Expected: the frame loop achieves II 1, estimated period is below 10 ns, no floating-point operators appear, and scalar-core resource use is small relative to K26 capacity. If synthesis fails or II exceeds 1, stop at the first scheduling/dependency diagnostic before changing code.
 
-- [ ] **Step 3: Add `README.md`**
+- [x] **Step 3: Add `README.md`**
 
 ```markdown
 # Motion SAD HLS Core
@@ -381,7 +338,7 @@ The core returns total SAD, the number of differences strictly greater than
 ## C simulation
 
 ```powershell
-& 'D:\xilinx\Vitis_HLS\2023.1\bin\vitis_hls.bat' -f run_hls.tcl
+.\run_hls.ps1
 ```
 
 Success includes `All motion_sad tests passed` and `CSim done with 0 errors`.
@@ -389,9 +346,7 @@ Success includes `All motion_sad tests passed` and `CSim done with 0 errors`.
 ## K26 synthesis
 
 ```powershell
-$env:MOTION_SAD_SYNTH = '1'
-& 'D:\xilinx\Vitis_HLS\2023.1\bin\vitis_hls.bat' -f run_hls.tcl
-Remove-Item Env:MOTION_SAD_SYNTH
+.\run_hls.ps1 -Synthesize
 ```
 
 The report is at
@@ -400,18 +355,16 @@ frame loop for II 1, the timing estimate against 10 ns, and BRAM, DSP, LUT,
 and FF utilization. The generated `build/` directory is not committed.
 ```
 
-- [ ] **Step 4: Re-run complete verification**
+- [x] **Step 4: Re-run complete verification**
 
 ```powershell
-$env:MOTION_SAD_SYNTH = '1'
-& 'D:\xilinx\Vitis_HLS\2023.1\bin\vitis_hls.bat' -f run_hls.tcl
-Remove-Item Env:MOTION_SAD_SYNTH
+.\run_hls.ps1 -Synthesize
 git diff --check
 ```
 
 Expected: C simulation and synthesis pass, the loop achieves II 1, and `git diff --check` emits no output.
 
-- [ ] **Step 5: Commit the documentation**
+- [x] **Step 5: Commit the documentation**
 
 ```powershell
 git add fpga/hls/motion_sad/README.md

@@ -42,6 +42,7 @@ The top-level function has these ports:
 - One AXI4-Stream input with 16 data bits per word.
 - `data[7:0]` is the previous-frame grayscale pixel.
 - `data[15:8]` is the current-frame grayscale pixel.
+- `keep` and `strb` must both be `0b11`, marking both data bytes valid.
 - `last` must be asserted only on pixel 57,599.
 - An 8-bit AXI4-Lite `change_threshold` control.
 - A 32-bit AXI4-Lite `sad_sum` result.
@@ -57,13 +58,13 @@ is sufficient. Normalization to a mean motion score remains a software task.
 
 ## Datapath
 
-For exactly 57,600 input words, the core will:
+For up to 57,600 input words, the core will:
 
 1. Unpack the previous and current 8-bit values.
 2. Compute their unsigned absolute difference.
 3. Accumulate the difference into `sad_sum`.
 4. Increment `changed_pixels` when the difference exceeds the threshold.
-5. Check AXI4-Stream `last` against the expected final-pixel position.
+5. Check `keep`, `strb`, and AXI4-Stream `last` against the frame contract.
 
 The loop target is initiation interval 1, allowing one paired pixel per clock
 after pipeline fill. The initial synthesis clock target is 100 MHz for the
@@ -71,13 +72,14 @@ K26 part used by KV260.
 
 ## Frame Error Behavior
 
-The core always consumes exactly 57,600 words. `frame_error` is asserted when
-`last` appears before the final pixel or is missing from the final pixel.
+`frame_error` is asserted when `last` appears before the final pixel, is
+missing from the final pixel, or either byte qualifier is not `0b11`.
 
-An early `last` does not shorten processing because doing so would make frame
-length and downstream synchronization ambiguous. Recovery is delegated to the
-caller, which must discard the reported statistics and start a fresh core
-transaction with a complete frame.
+An early `last` ends the current transaction immediately. This preserves the
+next packet already queued in the stream instead of consuming it as part of
+the malformed frame. A missing final `last` consumes at most 57,600 words and
+then returns an error. In either case, the caller must discard the partial
+statistics and start a fresh core transaction with a complete frame.
 
 ## Files
 
@@ -88,6 +90,8 @@ Implementation will be isolated under `fpga/hls/motion_sad/`:
 - `tb/test_motion_sad.cpp`: self-checking C simulation testbench.
 - `run_hls.tcl`: repeatable C simulation and C synthesis flow for Vitis HLS
   2023.1, with local NTFS staging for SSHFS-hosted workspaces.
+- `run_hls.ps1`: checked Windows entry point that creates and cleans a unique
+  staging directory and rejects Vitis error text even if the process exits 0.
 - `README.md`: exact local commands and interpretation of generated reports.
 
 Generated Vitis HLS projects and reports will be ignored rather than committed.
@@ -100,8 +104,10 @@ The self-checking C testbench will cover:
 - Uniform known difference: exact SAD and changed-pixel count.
 - Threshold boundary: a difference equal to the threshold is not counted.
 - Sparse changed pixels: exact scalar results.
-- Early `last`: frame error asserted.
+- Maximum reverse difference: accumulator range and unsigned subtraction.
+- Early `last`: frame error asserted without consuming the following packet.
 - Missing final `last`: frame error asserted.
+- Invalid `keep` or `strb`: frame error asserted.
 
 After C simulation passes, C synthesis must complete for the installed K26
 part. The synthesis report will be checked for:
