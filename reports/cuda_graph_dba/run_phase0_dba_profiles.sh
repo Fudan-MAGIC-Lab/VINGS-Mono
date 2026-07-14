@@ -243,7 +243,7 @@ run_variant \
     --lightglue-weight-dir "$lightglue_root" \
     --loop-onnx-provider cpu \
     --frontend-image-size 344,616 \
-    --frontend-save-buffer 64 \
+    --frontend-save-buffer 512 \
     --frontend-iters1 3 --frontend-iters2 1 \
     --droid-update-backend torch \
     --profile-runtime \

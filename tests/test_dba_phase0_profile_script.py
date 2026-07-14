@@ -36,3 +36,9 @@ def test_phase0_driver_includes_unprofiled_smallcity_control():
     content = SCRIPT.read_text()
     assert "cuda_graph_dba_phase0_smallcity50_control" in content
     assert 'run_dir_${label}.txt' in content
+
+
+def test_phase0_driver_keeps_a_full_sequence_save_buffer_for_hotel():
+    content = SCRIPT.read_text()
+    hotel_block = content.split("run_variant \\\n  hotel344", 1)[1]
+    assert "--frontend-save-buffer 512" in hotel_block
