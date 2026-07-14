@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import sys
 from collections import Counter
@@ -11,6 +12,130 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from frontend.dba_bucket_manifest import DBABucketSpec, DBACallSignature
+from profiling.dba_memory_calibration import (
+    CAPTURE_BOUNDARIES,
+    validate_calibration,
+    workspace_breakdown,
+)
+
+
+class CalibratedWorkspaceEstimator:
+    def __init__(self, calibration, provenance):
+        self.calibration = calibration
+        self.provenance = provenance
+        self.supported_variants = {
+            (
+                bool(row["use_inactive"]),
+                bool(row["upsample"]),
+                str(row["dtype"]),
+            )
+            for row in calibration["signatures"]
+        }
+
+    def _breakdown_for_call(self, call):
+        variant = (call.use_inactive, call.upsample, call.dtype)
+        if variant not in self.supported_variants:
+            raise ValueError(
+                "DBA memory calibration does not support call variant "
+                f"{variant!r}"
+            )
+        result = workspace_breakdown(self.calibration, call)
+        result["persistent_shadow_bytes"] = (
+            result["modeled_workspace_bytes"]
+            - result["calibrated_transient_bytes"]
+        )
+        return result
+
+    def estimate_call(self, call):
+        return self._breakdown_for_call(call)[
+            "estimated_workspace_bytes"
+        ]
+
+    def breakdown_for_bucket(self, bucket):
+        call = DBACallSignature(
+            active_edges=bucket.active_edges,
+            ba_edges=bucket.ba_edges,
+            source_poses=bucket.source_poses,
+            pose_window=bucket.pose_window,
+            use_inactive=bucket.use_inactive,
+            upsample=bucket.upsample,
+            dtype=bucket.dtype,
+            feature_shape=(43, 77),
+            frontend_image_size=(344, 616),
+            mode="vo",
+            backend="torch",
+        )
+        return self._breakdown_for_call(call)
+
+    def __call__(
+        self,
+        active_edges,
+        ba_edges,
+        source_poses,
+        pose_window,
+        dtype,
+    ):
+        variants = [
+            variant
+            for variant in self.supported_variants
+            if variant[2] == dtype
+        ]
+        if len(variants) != 1:
+            raise ValueError(
+                "calibrated estimator requires an unambiguous call variant"
+            )
+        use_inactive, upsample, _ = variants[0]
+        call = DBACallSignature(
+            active_edges=active_edges,
+            ba_edges=ba_edges,
+            source_poses=source_poses,
+            pose_window=pose_window,
+            use_inactive=use_inactive,
+            upsample=upsample,
+            dtype=dtype,
+            feature_shape=(43, 77),
+            frontend_image_size=(344, 616),
+            mode="vo",
+            backend="torch",
+        )
+        return self.estimate_call(call)
+
+
+def load_calibrated_estimator(path, boundary):
+    path = Path(path)
+    raw = path.read_bytes()
+    calibration = validate_calibration(json.loads(raw))
+    if calibration.get("capture_boundary") != boundary:
+        raise ValueError("DBA memory calibration boundary mismatch")
+    platform = calibration.get("platform", {})
+    if (
+        tuple(platform.get("frontend_image_size", ())) != (344, 616)
+        or tuple(platform.get("feature_shape", ())) != (43, 77)
+    ):
+        raise ValueError(
+            "DBA memory calibration must target 344x616 -> 43x77"
+        )
+    if platform.get("mode") != "vo" or platform.get("backend") != "torch":
+        raise ValueError(
+            "DBA memory calibration must target VO with the torch backend"
+        )
+    dtypes = set(platform.get("dtypes", ()))
+    if not dtypes or not dtypes <= {"float16", "float32"}:
+        raise ValueError("DBA memory calibration has unsupported dtypes")
+    validation = calibration["validation"]
+    provenance = {
+        "kind": "calibrated",
+        "capture_boundary": boundary,
+        "calibration_sha256": hashlib.sha256(raw).hexdigest(),
+        "weighted_mape": validation["weighted_mape"],
+        "held_out_weighted_mape": validation[
+            "held_out_weighted_mape"
+        ],
+        "underprediction_count": len(
+            validation["underpredicted_signatures"]
+        ),
+    }
+    return CalibratedWorkspaceEstimator(calibration, provenance)
 
 
 def load_calls(paths):
@@ -82,7 +207,7 @@ def _call_key(call):
     )
 
 
-def _bucket_from_call(call, max_padding_ratio):
+def _bucket_from_call(call, max_padding_ratio, workspace_estimator):
     name = (
         f"e{call.active_edges}_ba{call.ba_edges}_s{call.source_poses}_"
         f"p{call.pose_window}_{call.dtype}_"
@@ -99,12 +224,16 @@ def _bucket_from_call(call, max_padding_ratio):
         upsample=call.upsample,
         dtype=call.dtype,
         max_padding_ratio=max_padding_ratio,
-        estimated_workspace_bytes=estimate_workspace_bytes(
-            call.active_edges,
-            call.ba_edges,
-            call.source_poses,
-            call.pose_window,
-            call.dtype,
+        estimated_workspace_bytes=(
+            workspace_estimator.estimate_call(call)
+            if hasattr(workspace_estimator, "estimate_call")
+            else workspace_estimator(
+                call.active_edges,
+                call.ba_edges,
+                call.source_poses,
+                call.pose_window,
+                call.dtype,
+            )
         ),
     )
 
@@ -127,13 +256,21 @@ def plan_buckets(
     max_buckets,
     max_padding_ratio,
     max_workspace_bytes,
+    workspace_estimator=None,
+    memory_model=None,
 ):
+    workspace_estimator = workspace_estimator or estimate_workspace_bytes
+    memory_model = memory_model or {"kind": "phase0_conservative"}
     calls = [_as_signature(item) for item in raw_calls]
     supported = [call for call in calls if call.support_error() is None]
     counts = Counter(_call_key(call) for call in supported)
     unique = {_call_key(call): call for call in supported}
     candidates = [
-        _bucket_from_call(unique[key], max_padding_ratio)
+        _bucket_from_call(
+            unique[key],
+            max_padding_ratio,
+            workspace_estimator,
+        )
         for key in sorted(unique)
     ]
     candidates = [
@@ -178,6 +315,12 @@ def plan_buckets(
         key=lambda bucket: (bucket.estimated_workspace_bytes, bucket.name)
     )
     covered_calls = len(supported) - len(uncovered)
+    workspace_breakdowns = {}
+    if hasattr(workspace_estimator, "breakdown_for_bucket"):
+        workspace_breakdowns = {
+            bucket.name: workspace_estimator.breakdown_for_bucket(bucket)
+            for bucket in selected
+        }
     return {
         "schema_version": 1,
         "frontend_image_size": [344, 616],
@@ -189,6 +332,8 @@ def plan_buckets(
         "covered_calls": covered_calls,
         "coverage": covered_calls / len(supported) if supported else 0.0,
         "unsupported_calls": len(calls) - len(supported),
+        "memory_model": dict(memory_model),
+        "workspace_breakdowns": workspace_breakdowns,
         "buckets": [asdict(bucket) for bucket in selected],
         "observed_signature_counts": {
             repr(key): count for key, count in sorted(counts.items())
@@ -206,15 +351,51 @@ def render_report(result):
         f"- Coverage: {result['coverage']:.2%}",
         f"- Unsupported calls: {result['unsupported_calls']}",
         "",
-        "| Bucket | Active edges | BA edges | Source poses | Pose window | "
-        "Padding limit | Estimated MiB |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "## Memory model",
+        "",
+        f"- Kind: `{result['memory_model']['kind']}`",
     ]
+    memory_model = result["memory_model"]
+    if memory_model["kind"] == "calibrated":
+        lines.extend([
+            f"- Capture boundary: `{memory_model['capture_boundary']}`",
+            (
+                "- Calibration SHA-256: "
+                f"`{memory_model['calibration_sha256']}`"
+            ),
+            f"- Weighted MAPE: {memory_model['weighted_mape']:.2%}",
+            (
+                "- Underpredicted signatures: "
+                f"{memory_model['underprediction_count']}"
+            ),
+        ])
+    lines.extend([
+        "",
+        "## Buckets",
+        "",
+        "| Bucket | Active edges | BA edges | Source poses | Pose window | "
+        "Padding limit | Shadow MiB | Transient MiB | Margin MiB | "
+        "Estimated MiB |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
     for bucket in result["buckets"]:
+        breakdown = result["workspace_breakdowns"].get(bucket["name"])
+        if breakdown is None:
+            shadow = transient = margin = "-"
+        else:
+            shadow = f"{breakdown['persistent_shadow_bytes'] / 1024**2:.2f}"
+            transient = (
+                f"{breakdown['calibrated_transient_bytes'] / 1024**2:.2f}"
+            )
+            margin = f"{breakdown['safety_margin_bytes'] / 1024**2:.2f}"
         lines.append(
             "| {name} | {active_edges} | {ba_edges} | {source_poses} | "
-            "{pose_window} | {max_padding_ratio:.2%} | {mib:.2f} |".format(
+            "{pose_window} | {max_padding_ratio:.2%} | {shadow} | "
+            "{transient} | {margin} | {mib:.2f} |".format(
                 **bucket,
+                shadow=shadow,
+                transient=transient,
+                margin=margin,
                 mib=bucket["estimated_workspace_bytes"] / (1024**2),
             )
         )
@@ -232,17 +413,36 @@ def build_parser():
     parser.add_argument("--max-buckets", type=int, default=6)
     parser.add_argument("--max-padding-ratio", type=float, default=0.35)
     parser.add_argument("--max-workspace-mb", type=float, default=1024.0)
+    parser.add_argument("--memory-calibration")
+    parser.add_argument(
+        "--capture-boundary",
+        choices=CAPTURE_BOUNDARIES,
+    )
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if bool(args.memory_calibration) != bool(args.capture_boundary):
+        raise ValueError(
+            "--memory-calibration and --capture-boundary must be used together"
+        )
+    estimator = None
+    memory_model = None
+    if args.memory_calibration:
+        estimator = load_calibrated_estimator(
+            args.memory_calibration,
+            args.capture_boundary,
+        )
+        memory_model = estimator.provenance
     result = plan_buckets(
         load_calls(args.details),
         target_coverage=args.target_coverage,
         max_buckets=args.max_buckets,
         max_padding_ratio=args.max_padding_ratio,
         max_workspace_bytes=int(args.max_workspace_mb * 1024**2),
+        workspace_estimator=estimator,
+        memory_model=memory_model,
     )
     manifest_path = Path(args.output_manifest)
     report_path = Path(args.output_report)
