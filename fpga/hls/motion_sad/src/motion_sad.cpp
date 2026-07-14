@@ -25,13 +25,17 @@ void motion_sad(
         const ap_uint<8> difference =
             current >= previous ? current - previous : previous - current;
         const bool expected_last = i == MOTION_FRAME_PIXELS - 1;
+        const bool received_last = static_cast<bool>(word.last);
 
         sad_accumulator += difference;
         if (difference > change_threshold) {
             ++changed_accumulator;
         }
-        if (static_cast<bool>(word.last) != expected_last) {
+        if (received_last != expected_last || word.keep != 3 || word.strb != 3) {
             error = 1;
+        }
+        if (received_last) {
+            break;
         }
     }
 

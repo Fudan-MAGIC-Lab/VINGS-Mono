@@ -17,14 +17,15 @@ int failures = 0;
 template <typename PreviousPixel, typename CurrentPixel>
 Result run_frame(PreviousPixel previous_pixel, CurrentPixel current_pixel,
                  uint8_t threshold,
-                 int last_index = MOTION_FRAME_PIXELS - 1) {
+                 int last_index = MOTION_FRAME_PIXELS - 1,
+                 int invalid_qualifier_index = -1) {
     hls::stream<motion_axis_t> input;
     for (int i = 0; i < MOTION_FRAME_PIXELS; ++i) {
         motion_axis_t word;
         word.data.range(7, 0) = ap_uint<8>(previous_pixel(i));
         word.data.range(15, 8) = ap_uint<8>(current_pixel(i));
-        word.keep = -1;
-        word.strb = -1;
+        word.keep = i == invalid_qualifier_index ? 1 : 3;
+        word.strb = i == invalid_qualifier_index ? 1 : 3;
         word.last = i == last_index;
         input.write(word);
     }
@@ -85,11 +86,52 @@ void test_sparse_changes() {
     expect_equal("sparse", "frame_error", result.frame_error, false);
 }
 
-void test_early_last() {
+void test_reverse_maximum_difference() {
     const Result result = run_frame(
-        [](int) { return static_cast<uint8_t>(0); },
-        [](int) { return static_cast<uint8_t>(0); }, 0, 100);
-    expect_equal("early_last", "frame_error", result.frame_error, true);
+        [](int) { return static_cast<uint8_t>(255); },
+        [](int) { return static_cast<uint8_t>(0); }, 254);
+    expect_equal("reverse_max", "sad_sum", result.sad_sum, 14688000u);
+    expect_equal("reverse_max", "changed_pixels", result.changed_pixels,
+                 57600u);
+    expect_equal("reverse_max", "frame_error", result.frame_error, false);
+}
+
+void test_early_last_preserves_next_packet() {
+    hls::stream<motion_axis_t> input;
+
+    for (int i = 0; i <= 100; ++i) {
+        motion_axis_t word;
+        word.data = 0;
+        word.keep = 3;
+        word.strb = 3;
+        word.last = i == 100;
+        input.write(word);
+    }
+    for (int i = 0; i < MOTION_FRAME_PIXELS; ++i) {
+        motion_axis_t word;
+        word.data.range(7, 0) = 10;
+        word.data.range(15, 8) = 20;
+        word.keep = 3;
+        word.strb = 3;
+        word.last = i == MOTION_FRAME_PIXELS - 1;
+        input.write(word);
+    }
+
+    ap_uint<32> sad_sum = 0;
+    ap_uint<32> changed_pixels = 0;
+    ap_uint<1> frame_error = 0;
+    motion_sad(input, 5, sad_sum, changed_pixels, frame_error);
+
+    int remaining_words = 0;
+    while (!input.empty()) {
+        (void)input.read();
+        ++remaining_words;
+    }
+
+    expect_equal("early_last", "frame_error",
+                 static_cast<bool>(frame_error), true);
+    expect_equal("early_last", "remaining_words", remaining_words,
+                 MOTION_FRAME_PIXELS);
 }
 
 void test_missing_last() {
@@ -99,6 +141,15 @@ void test_missing_last() {
     expect_equal("missing_last", "frame_error", result.frame_error, true);
 }
 
+void test_invalid_byte_qualifiers() {
+    const Result result = run_frame(
+        [](int) { return static_cast<uint8_t>(0); },
+        [](int) { return static_cast<uint8_t>(0); }, 0,
+        MOTION_FRAME_PIXELS - 1, 42);
+    expect_equal("invalid_qualifiers", "frame_error", result.frame_error,
+                 true);
+}
+
 }  // namespace
 
 int main() {
@@ -106,8 +157,10 @@ int main() {
     test_uniform_difference();
     test_threshold_boundary();
     test_sparse_changes();
-    test_early_last();
+    test_reverse_maximum_difference();
+    test_early_last_preserves_next_packet();
     test_missing_last();
+    test_invalid_byte_qualifiers();
 
     if (failures != 0) {
         std::cerr << failures << " assertion(s) failed\n";
