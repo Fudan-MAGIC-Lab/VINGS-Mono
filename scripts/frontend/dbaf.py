@@ -110,6 +110,21 @@ class DBAFusion:
 
     def set_runtime_profiler(self, profiler):
         self.profiler = profiler
+        cfg = getattr(self, "cfg", {})
+        memory_cfg = cfg.get("profiling", {}).get("dba_memory", {})
+        if hasattr(profiler, "set_metadata"):
+            profiler.set_metadata(
+                "dba_memory",
+                {
+                    "enabled": bool(memory_cfg.get("enabled", False)),
+                    "samples_per_signature": int(
+                        memory_cfg.get("samples_per_signature", 2)
+                    ),
+                    "tracker_device": str(
+                        cfg.get("device", {}).get("tracker", "cuda:0")
+                    ),
+                },
+            )
         cnet_backend = getattr(self, 'cnet_backend', None)
         if cnet_backend is None:
             cnet_status = getattr(self, 'cnet_backend_status', None)
@@ -229,4 +244,3 @@ class DBAFusion:
             self.frontend.video.count_save_bias = load_dict['frontend']['video']['count_save_bias']
         
     
-

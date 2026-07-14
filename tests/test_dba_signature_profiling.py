@@ -44,7 +44,7 @@ class DetailProfiler:
         self.details.append((kind, payload, frame_idx))
 
 
-def test_record_dba_signature_uses_final_ba_edge_count():
+def make_graph():
     graph = CovisibleGraph.__new__(CovisibleGraph)
     graph.ii = torch.tensor([1, 1, 2, 3], device="cpu")
     graph.jj = torch.tensor([2, 3, 3, 4], device="cpu")
@@ -60,13 +60,39 @@ def test_record_dba_signature_uses_final_ba_edge_count():
     graph.net = torch.zeros(1, 4, 128, 43, 77, dtype=torch.float16)
     graph.profiler = DetailProfiler()
     graph.profiler_frame_idx = 12
+    return graph
 
-    graph._record_dba_signature(
+
+def test_build_dba_signature_uses_final_ba_edge_count():
+    graph = make_graph()
+
+    call = graph._build_dba_signature(
         t0=2,
         observed_t1=6,
         use_inactive=True,
         ba_edges=6,
     )
+
+    assert call.active_edges == 4
+    assert call.ba_edges == 6
+    assert call.source_poses == 3
+    assert call.pose_window == 4
+    assert call.use_inactive is True
+    assert call.frontend_image_size == (344, 616)
+    assert call.feature_shape == (43, 77)
+    assert call.backend == "torch"
+
+
+def test_record_dba_signature_uses_final_ba_edge_count():
+    graph = make_graph()
+
+    call = graph._build_dba_signature(
+        t0=2,
+        observed_t1=6,
+        use_inactive=True,
+        ba_edges=6,
+    )
+    graph._record_dba_signature(call)
 
     kind, payload, frame_idx = graph.profiler.details[0]
     assert kind == "dba_signature"

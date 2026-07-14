@@ -143,6 +143,38 @@ class DBAFusionRuntimeProfilingTests(unittest.TestCase):
             profiler.metadata["droid_update"]["actual_backend"], "torch"
         )
 
+    def test_set_runtime_profiler_records_dba_memory_configuration(self):
+        tracker = DBAFusion.__new__(DBAFusion)
+        tracker.filterx = FakeMotionFilter()
+        tracker.frontend = FakeFrontend()
+        tracker.net = types.SimpleNamespace(
+            update=types.SimpleNamespace(
+                profiler=None,
+                profiler_frame_idx=None,
+            )
+        )
+        tracker.cfg = {
+            "device": {"tracker": "cuda:0"},
+            "profiling": {
+                "dba_memory": {
+                    "enabled": True,
+                    "samples_per_signature": 2,
+                }
+            },
+        }
+        profiler = RecordingProfiler()
+
+        tracker.set_runtime_profiler(profiler)
+
+        self.assertEqual(
+            profiler.metadata["dba_memory"],
+            {
+                "enabled": True,
+                "samples_per_signature": 2,
+                "tracker_device": "cuda:0",
+            },
+        )
+
     def test_track_records_motion_filter_and_frontend_update_stages(self):
         tracker = DBAFusion.__new__(DBAFusion)
         tracker.filterx = FakeMotionFilter()

@@ -11,6 +11,12 @@ import cv2
 from contextlib import nullcontext
 from frontend.depth_video import DepthVideo
 from frontend.dba_bucket_manifest import DBACallSignature
+from profiling.dba_memory import (
+    DBAMemorySampleBuilder,
+    SignatureSampleLimiter,
+    TorchCUDAMemoryBackend,
+    unique_storage_bytes,
+)
 import matplotlib.cm as cm
 import matplotlib
 
@@ -53,6 +59,9 @@ class CovisibleGraph:
         self.img_count = 0
         self.profiler = None
         self.profiler_frame_idx = None
+        self.dba_memory_limiter = None
+        self.dba_memory_backend = None
+        self._configure_dba_memory_sampler()
 
         self.skip_edge       = config['frontend']['skip_edge']
         self.frontend_window = config['frontend']['frontend_window']
@@ -73,18 +82,135 @@ class CovisibleGraph:
             return "torch"
         return getattr(backend, "actual_backend", "unknown")
 
-    def _record_dba_signature(
+    def _configure_dba_memory_sampler(self, backend=None):
+        cfg = self.video.cfg.get("profiling", {}).get(
+            "dba_memory", {}
+        )
+        if not cfg.get("enabled", False):
+            self.dba_memory_limiter = None
+            self.dba_memory_backend = None
+            return
+        self.dba_memory_limiter = SignatureSampleLimiter(
+            cfg.get("samples_per_signature", 2)
+        )
+        self.dba_memory_backend = (
+            backend or TorchCUDAMemoryBackend(self.device)
+        )
+
+    @staticmethod
+    def _dba_signature_key(call):
+        return (
+            call.active_edges,
+            call.ba_edges,
+            call.source_poses,
+            call.pose_window,
+            call.use_inactive,
+            call.upsample,
+            call.dtype,
+            call.feature_shape,
+            call.frontend_image_size,
+            call.mode,
+            call.backend,
+        )
+
+    def _preview_dba_memory_signature(self, t0, t1, use_inactive):
+        if t0 is None:
+            t0 = max(1, self.ii.min().item() + 1)
+        if use_inactive:
+            mask = (
+                (self.ii_inac >= t0 - self.inac_range)
+                & (self.jj_inac >= t0 - self.inac_range)
+            )
+            ii = torch.cat([self.ii_inac[mask], self.ii], 0)
+            jj = torch.cat([self.jj_inac[mask], self.jj], 0)
+        else:
+            ii, jj = self.ii, self.jj
+        observed_t1 = t1
+        if observed_t1 is None:
+            observed_t1 = max(ii.max().item(), jj.max().item()) + 1
+        return self._build_dba_signature(
+            t0=t0,
+            observed_t1=observed_t1,
+            use_inactive=use_inactive,
+            ba_edges=int(ii.numel()),
+        )
+
+    def _dba_memory_storage(self):
+        required_device_type = torch.device(self.device).type
+        corr_pyramid = []
+        if self.corr is not None:
+            corr_pyramid = getattr(self.corr, "corr_pyramid", [])
+        corr = unique_storage_bytes(
+            corr_pyramid,
+            required_device_type=required_device_type,
+        )
+        recurrent = unique_storage_bytes(
+            [self.net, self.inp],
+            required_device_type=required_device_type,
+        )
+        state = unique_storage_bytes(
+            {
+                "coords0": self.coords0,
+                "target": self.target,
+                "weight": self.weight,
+                "damping": self.damping,
+                "active_indices": [self.ii, self.jj],
+                "inactive_indices": [self.ii_inac, self.jj_inac],
+            },
+            required_device_type=required_device_type,
+        )
+        return {
+            "corr_resident_storage_bytes": corr.storage_bytes,
+            "recurrent_resident_storage_bytes": (
+                recurrent.storage_bytes
+            ),
+            "state_resident_storage_bytes": state.storage_bytes,
+            "excluded_tensor_count": (
+                corr.excluded_tensor_count
+                + recurrent.excluded_tensor_count
+                + state.excluded_tensor_count
+            ),
+        }
+
+    def _begin_dba_memory_sample(self, call):
+        profiler = getattr(self, "profiler", None)
+        if (
+            self.dba_memory_limiter is None
+            or self.dba_memory_backend is None
+            or profiler is None
+            or not hasattr(profiler, "record_detail")
+        ):
+            return None
+        ordinal = self.dba_memory_limiter.reserve(
+            self._dba_signature_key(call)
+        )
+        if ordinal is None:
+            return None
+        builder = DBAMemorySampleBuilder(self.dba_memory_backend)
+        builder.begin(
+            signature=call.to_dict(),
+            sample_ordinal=ordinal,
+            storage=self._dba_memory_storage(),
+        )
+        return builder
+
+    def _finish_dba_memory_sample(self, builder):
+        if builder is None:
+            return
+        self.profiler.record_detail(
+            "dba_memory_sample",
+            builder.finish(),
+            frame_idx=self.profiler_frame_idx,
+        )
+
+    def _build_dba_signature(
         self,
         t0,
         observed_t1,
         use_inactive,
         ba_edges,
     ):
-        profiler = getattr(self, "profiler", None)
-        if profiler is None or not hasattr(profiler, "record_detail"):
-            return
-
-        call = DBACallSignature(
+        return DBACallSignature(
             active_edges=int(self.ii.numel()),
             ba_edges=int(ba_edges),
             source_poses=int(torch.unique(self.ii).numel()),
@@ -97,6 +223,12 @@ class CovisibleGraph:
             mode=str(self.video.cfg["mode"]),
             backend=self._update_backend_name(),
         )
+
+    def _record_dba_signature(self, call):
+        profiler = getattr(self, "profiler", None)
+        if profiler is None or not hasattr(profiler, "record_detail"):
+            return
+
         payload = call.to_dict()
         if torch.cuda.is_available():
             payload["cuda_allocated_bytes"] = int(
@@ -274,11 +406,25 @@ class CovisibleGraph:
             motn = torch.cat([coords1 - self.coords0, self.target - coords1], dim=-1)
             motn = motn.permute(0,1,4,2,3).clamp(-64.0, 64.0) # 1,2,4,48,96
 
+        memory_call = None
+        memory_builder = None
+        if self.dba_memory_limiter is not None:
+            memory_call = self._preview_dba_memory_signature(
+                t0=t0,
+                t1=t1,
+                use_inactive=use_inactive,
+            )
+            memory_builder = self._begin_dba_memory_sample(memory_call)
+
         with self._profile("covisible_graph_corr"):
             corr = self.corr(coords1)
+        if memory_builder is not None:
+            memory_builder.mark("corr_sample_complete")
 
         self.net, delta, weight, damping, upmask = \
             self.update_op(self.net, self.inp, corr, motn, self.ii, self.jj, self.upsample)
+        if memory_builder is not None:
+            memory_builder.mark("update_op_complete")
         
         '''
         self.video.disps.shape: [80, 43, 77]
@@ -310,12 +456,19 @@ class CovisibleGraph:
             observed_t1 = t1
             if observed_t1 is None:
                 observed_t1 = max(ii.max().item(), jj.max().item()) + 1
-            self._record_dba_signature(
+            dba_call = self._build_dba_signature(
                 t0=t0,
                 observed_t1=observed_t1,
                 use_inactive=use_inactive,
                 ba_edges=int(ii.numel()),
             )
+            if (
+                memory_builder is not None
+                and self._dba_signature_key(memory_call)
+                != self._dba_signature_key(dba_call)
+            ):
+                raise RuntimeError("DBA memory signature preview mismatch")
+            self._record_dba_signature(dba_call)
 
             # Some real-time visualization for debugging
             # 1) Disparity
@@ -402,11 +555,15 @@ class CovisibleGraph:
 
             target = target.view(-1, ht, wd, 2).permute(0,3,1,2).contiguous()
             weight = weight.view(-1, ht, wd, 2).permute(0,3,1,2).contiguous()
+            if memory_builder is not None:
+                memory_builder.mark("ba_inputs_complete")
 
             # Dense bundle adjustment
             with self._profile("covisible_graph_ba"):
                 self.video.ba(target, weight, damping, ii, jj, t0, t1,
                     itrs=itrs, lm=1e-4, ep=0.1, motion_only=motion_only)
+            if memory_builder is not None:
+                memory_builder.mark("ba_complete")
         
             if self.upsample:
                 '''
@@ -414,6 +571,12 @@ class CovisibleGraph:
                 '''
                 with self._profile("covisible_graph_upsample"):
                     self.video.upsample(torch.unique(self.ii), upmask)
+                if memory_builder is not None:
+                    memory_builder.mark("upsample_complete")
+            elif memory_builder is not None:
+                memory_builder.mark("update_exit")
+
+        self._finish_dba_memory_sample(memory_builder)
 
         self.age += 1
 
