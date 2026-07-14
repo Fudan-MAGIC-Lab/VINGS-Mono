@@ -44,6 +44,8 @@ parser.add_argument("--enable-mapping-budget", action="store_true", help="Enable
 parser.add_argument("--enable-jetson-pruning", action="store_true", help="Enable Jetson-aware Gaussian pruning scheduling")
 parser.add_argument("--enable-pixel-budget", action="store_true", help="Enable dynamic pixel downsampling during mapper training")
 parser.add_argument("--profile-runtime", action="store_true", help="Write module-level runtime profiling reports")
+parser.add_argument("--profile-dba-memory", action="store_true", help="Sample synchronized CUDA memory at DBA stage boundaries; requires --profile-runtime")
+parser.add_argument("--profile-dba-memory-samples-per-signature", type=int, default=2, help="Maximum synchronized memory samples for one exact DBA signature")
 parser.add_argument("--enable-metric-depth-schedule", action="store_true", help="Run metric depth with interval or keyframe-aware scheduling instead of every frame")
 parser.add_argument("--metric-depth-warmup", type=int, default=None, help="Number of initial frames that always run metric depth when scheduling is enabled")
 parser.add_argument("--metric-depth-interval", type=int, default=None, help="Run metric depth every N frames after warmup when scheduling is enabled")
@@ -74,6 +76,10 @@ parser.add_argument("--motion-gate-grid-size", type=int, default=None, help="VPI
 parser.add_argument("--motion-gate-vpi-levels", type=int, default=None, help="Number of VPI OFA pyramid levels; 1 is fastest and most robust")
 parser.add_argument("--motion-gate-vpi-quality", choices=["low", "medium", "high"], default=None, help="VPI OFA optical-flow quality")
 args = parser.parse_args()
+if args.profile_dba_memory and not args.profile_runtime:
+    parser.error("--profile-dba-memory requires --profile-runtime")
+if args.profile_dba_memory_samples_per_signature < 1:
+    parser.error("--profile-dba-memory-samples-per-signature must be at least 1")
 config_path = args.config
 from gaussian.general_utils import load_config, get_name
 config = load_config(config_path)
@@ -96,6 +102,7 @@ def apply_overrides(cfg):
     cfg.setdefault('pixel_budget', {})
     cfg.setdefault('profiling', {})
     cfg['profiling'].setdefault('runtime', {})
+    cfg['profiling'].setdefault('dba_memory', {})
     cfg.setdefault('metric_depth_schedule', {})
     cfg.setdefault('inference', {})
     cfg.setdefault('eval_export', {})
@@ -152,6 +159,10 @@ def apply_overrides(cfg):
         cfg['pixel_budget']['enabled'] = True
     if args.profile_runtime:
         cfg['profiling']['runtime']['enabled'] = True
+    cfg['profiling']['dba_memory']['enabled'] = bool(args.profile_dba_memory)
+    cfg['profiling']['dba_memory']['samples_per_signature'] = int(
+        args.profile_dba_memory_samples_per_signature
+    )
     if args.enable_metric_depth_schedule:
         cfg['metric_depth_schedule']['enabled'] = True
     if args.metric_depth_warmup is not None:

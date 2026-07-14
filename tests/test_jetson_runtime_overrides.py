@@ -1,8 +1,10 @@
 import pathlib
+import io
 import runpy
 import sys
 import types
 import unittest
+from contextlib import redirect_stderr
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -228,6 +230,67 @@ class JetsonRuntimeOverrideTests(unittest.TestCase):
         updated = globals_dict["apply_overrides"](cfg)
 
         self.assertTrue(updated["profiling"]["runtime"]["enabled"])
+
+    def test_run_py_can_enable_sampled_dba_memory_profiling(self):
+        globals_dict = _load_run_globals(
+            [
+                "run.py",
+                "dummy.yaml",
+                "--profile-runtime",
+                "--profile-dba-memory",
+                "--profile-dba-memory-samples-per-signature",
+                "3",
+            ]
+        )
+
+        cfg = {
+            "dataset": {},
+            "output": {},
+            "frontend": {},
+            "device": {},
+            "looper": {},
+            "profiling": {"runtime": {"enabled": False}},
+            "training_args": {"iters": 30},
+        }
+        updated = globals_dict["apply_overrides"](cfg)
+
+        self.assertTrue(updated["profiling"]["runtime"]["enabled"])
+        self.assertTrue(updated["profiling"]["dba_memory"]["enabled"])
+        self.assertEqual(
+            updated["profiling"]["dba_memory"]["samples_per_signature"],
+            3,
+        )
+
+    def test_run_py_rejects_dba_memory_without_runtime_profiler(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaisesRegex(SystemExit, "2"):
+                _load_run_globals(
+                    [
+                        "run.py",
+                        "dummy.yaml",
+                        "--profile-dba-memory",
+                    ]
+                )
+
+        self.assertIn("requires --profile-runtime", stderr.getvalue())
+
+    def test_run_py_rejects_nonpositive_dba_memory_sample_limit(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaisesRegex(SystemExit, "2"):
+                _load_run_globals(
+                    [
+                        "run.py",
+                        "dummy.yaml",
+                        "--profile-runtime",
+                        "--profile-dba-memory",
+                        "--profile-dba-memory-samples-per-signature",
+                        "0",
+                    ]
+                )
+
+        self.assertIn("must be at least 1", stderr.getvalue())
 
     def test_run_py_can_override_frontend_update_iterations(self):
         globals_dict = _load_run_globals(
