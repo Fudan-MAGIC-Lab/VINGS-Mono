@@ -1,4 +1,4 @@
-#include "motion_sad.hpp"
+#include "motion_sad_accel.hpp"
 
 #include <cstdint>
 #include <iostream>

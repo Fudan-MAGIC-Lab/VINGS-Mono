@@ -1,5 +1,5 @@
-#ifndef MOTION_SAD_HPP
-#define MOTION_SAD_HPP
+#ifndef MOTION_SAD_ACCEL_HPP
+#define MOTION_SAD_ACCEL_HPP
 
 #include <ap_axi_sdata.h>
 #include <ap_int.h>

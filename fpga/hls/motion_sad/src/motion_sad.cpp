@@ -1,4 +1,4 @@
-#include "motion_sad.hpp"
+#include "motion_sad_accel.hpp"
 
 void motion_sad(
     hls::stream<motion_axis_t>& pixel_pairs,
