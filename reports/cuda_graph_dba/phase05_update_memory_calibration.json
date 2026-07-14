@@ -1,0 +1,790 @@
+{
+  "capture_boundary": "update_aggregation_only",
+  "coefficient_scale": 1.0,
+  "coefficients": {
+    "active_edges": 15738452.193093851,
+    "ba_edges": 0.0,
+    "intercept": 6189352.914923476,
+    "pose_window": 829676.2978644753,
+    "source_poses": 0.0
+  },
+  "coverage": {
+    "observed_signature_count": 16,
+    "sample_count": 48,
+    "sampled_signature_count": 16,
+    "weighted_sample_coverage": 1.0
+  },
+  "platform": {
+    "backend": "torch",
+    "cuda_device": "Orin",
+    "cuda_version": "11.4",
+    "dtypes": [
+      "float16"
+    ],
+    "feature_shape": [
+      43,
+      77
+    ],
+    "frontend_image_size": [
+      344,
+      616
+    ],
+    "host": "Linux-5.10.216-tegra-aarch64-with-glibc2.17",
+    "mode": "vo",
+    "python": "3.8.20",
+    "torch_version": "2.1.0a0+41361538.nv23.06"
+  },
+  "resident_storage": {
+    "corr_resident_storage_bytes": {
+      "maximum": 1380766464,
+      "minimum": 690383232
+    },
+    "excluded_tensor_count": {
+      "maximum": 0,
+      "minimum": 0
+    },
+    "recurrent_resident_storage_bytes": {
+      "maximum": 81371136,
+      "minimum": 40685568
+    },
+    "state_resident_storage_bytes": {
+      "maximum": 3647316,
+      "minimum": 2371348
+    }
+  },
+  "safety_margin": {
+    "minimum_bytes": 67108864,
+    "ratio": 0.1
+  },
+  "schema_version": 1,
+  "signatures": [
+    {
+      "absolute_percentage_error": 0.011427352243911667,
+      "active_edges": 24,
+      "ba_edges": 31,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 552060629,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 479472662,
+      "measured_transient_peak_bytes": 381751808,
+      "mode": "vo",
+      "modeled_workspace_bytes": 484951765,
+      "observed_count": 16,
+      "peak_spread": 0.0016469758278132372,
+      "persistent_shadow_bytes": 97720854,
+      "pose_window": 4,
+      "predicted_transient_bytes": 387230911,
+      "safety_margin_bytes": 67108864,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 4238080,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 33110,
+        "delta_bytes": 635712,
+        "motion_bytes": 1271424,
+        "recurrent_bytes": 40685568,
+        "sampled_corr_bytes": 31149888,
+        "upmask_bytes": 19071360,
+        "weight_bytes": 635712
+      },
+      "signature_key": "(24, 31, 5, 4, True, True, 'float16')",
+      "source_poses": 5,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.011806780722854494,
+      "active_edges": 30,
+      "ba_edges": 37,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 670584105,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 596433284,
+      "measured_transient_peak_bytes": 475449344,
+      "mode": "vo",
+      "modeled_workspace_bytes": 603475241,
+      "observed_count": 16,
+      "peak_spread": 0.0005018242279875772,
+      "persistent_shadow_bytes": 120983940,
+      "pose_window": 5,
+      "predicted_transient_bytes": 482491301,
+      "safety_margin_bytes": 67108864,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 5085696,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 39732,
+        "delta_bytes": 794640,
+        "motion_bytes": 1589280,
+        "recurrent_bytes": 50856960,
+        "sampled_corr_bytes": 38937360,
+        "upmask_bytes": 22885632,
+        "weight_bytes": 794640
+      },
+      "signature_key": "(30, 37, 6, 5, True, True, 'float16')",
+      "source_poses": 6,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.010219367091135944,
+      "active_edges": 36,
+      "ba_edges": 36,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 800246593,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 720137552,
+      "measured_transient_peak_bytes": 571222016,
+      "mode": "vo",
+      "modeled_workspace_bytes": 727496902,
+      "observed_count": 48,
+      "peak_spread": 0.0022730776539257196,
+      "persistent_shadow_bytes": 148915536,
+      "pose_window": 7,
+      "predicted_transient_bytes": 578581366,
+      "safety_margin_bytes": 72749691,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 6780928,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 52976,
+        "delta_bytes": 953568,
+        "motion_bytes": 1907136,
+        "recurrent_bytes": 61028352,
+        "sampled_corr_bytes": 46724832,
+        "upmask_bytes": 30514176,
+        "weight_bytes": 953568
+      },
+      "signature_key": "(36, 36, 8, 7, True, True, 'float16')",
+      "source_poses": 8,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.011090865886621653,
+      "active_edges": 36,
+      "ba_edges": 43,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 794198588,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 714078962,
+      "measured_transient_peak_bytes": 569831936,
+      "mode": "vo",
+      "modeled_workspace_bytes": 721998716,
+      "observed_count": 13,
+      "peak_spread": 0.0009389435133379397,
+      "persistent_shadow_bytes": 144247026,
+      "pose_window": 6,
+      "predicted_transient_bytes": 577751690,
+      "safety_margin_bytes": 72199872,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 5933312,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 46354,
+        "delta_bytes": 953568,
+        "motion_bytes": 1907136,
+        "recurrent_bytes": 61028352,
+        "sampled_corr_bytes": 46724832,
+        "upmask_bytes": 26699904,
+        "weight_bytes": 953568
+      },
+      "signature_key": "(36, 43, 7, 6, True, True, 'float16')",
+      "source_poses": 7,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.011095333708803687,
+      "active_edges": 42,
+      "ba_edges": 49,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 924574412,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 831298656,
+      "measured_transient_peak_bytes": 663788544,
+      "mode": "vo",
+      "modeled_workspace_bytes": 840522192,
+      "observed_count": 19,
+      "peak_spread": 0.0006085793490283556,
+      "persistent_shadow_bytes": 167510112,
+      "pose_window": 7,
+      "predicted_transient_bytes": 673012080,
+      "safety_margin_bytes": 84052220,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 6780928,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 52976,
+        "delta_bytes": 1112496,
+        "motion_bytes": 2224992,
+        "recurrent_bytes": 71199744,
+        "sampled_corr_bytes": 54512304,
+        "upmask_bytes": 30514176,
+        "weight_bytes": 1112496
+      },
+      "signature_key": "(42, 49, 8, 7, True, True, 'float16')",
+      "source_poses": 8,
+      "split": "held_out",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.013418965634498795,
+      "active_edges": 46,
+      "ba_edges": 66,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1025603638,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 920021210,
+      "measured_transient_peak_bytes": 726109184,
+      "mode": "vo",
+      "modeled_workspace_bytes": 932366943,
+      "observed_count": 4,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 193912026,
+      "pose_window": 10,
+      "predicted_transient_bytes": 738454917,
+      "safety_margin_bytes": 93236695,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 9323776,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 72842,
+        "delta_bytes": 1218448,
+        "motion_bytes": 2436896,
+        "recurrent_bytes": 77980672,
+        "sampled_corr_bytes": 59703952,
+        "upmask_bytes": 41956992,
+        "weight_bytes": 1218448
+      },
+      "signature_key": "(46, 66, 11, 10, True, True, 'float16')",
+      "source_poses": 11,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.00991628331673376,
+      "active_edges": 48,
+      "ba_edges": 55,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1054950234,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 949628878,
+      "measured_transient_peak_bytes": 758855680,
+      "mode": "vo",
+      "modeled_workspace_bytes": 959045667,
+      "observed_count": 13,
+      "peak_spread": 0.0018250637591590538,
+      "persistent_shadow_bytes": 190773198,
+      "pose_window": 8,
+      "predicted_transient_bytes": 768272469,
+      "safety_margin_bytes": 95904567,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 7628544,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 59598,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 34328448,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 55, 9, 8, True, True, 'float16')",
+      "source_poses": 9,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.012206184596009908,
+      "active_edges": 48,
+      "ba_edges": 60,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1060998239,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 952912428,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 964543853,
+      "observed_count": 22,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 195441708,
+      "pose_window": 9,
+      "predicted_transient_bytes": 769102145,
+      "safety_margin_bytes": 96454386,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 8476160,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 66220,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 38142720,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 60, 10, 9, True, True, 'float16')",
+      "source_poses": 10,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.013013105739162072,
+      "active_edges": 48,
+      "ba_edges": 66,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1067046244,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 957580938,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 970042040,
+      "observed_count": 568,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 200110218,
+      "pose_window": 10,
+      "predicted_transient_bytes": 769931822,
+      "safety_margin_bytes": 97004204,
+      "sample_count": 4,
+      "shadow_terms": {
+        "aggregation_bytes": 9323776,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 72842,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 41956992,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 66, 11, 10, True, True, 'float16')",
+      "source_poses": 11,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.013013105739162072,
+      "active_edges": 48,
+      "ba_edges": 68,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1067046244,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 957580938,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 970042040,
+      "observed_count": 4,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 200110218,
+      "pose_window": 10,
+      "predicted_transient_bytes": 769931822,
+      "safety_margin_bytes": 97004204,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 9323776,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 72842,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 41956992,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 68, 11, 10, True, True, 'float16')",
+      "source_poses": 11,
+      "split": "held_out",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.013879534849303777,
+      "active_edges": 48,
+      "ba_edges": 72,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1067958888,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 957580938,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 970871716,
+      "observed_count": 122,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 200110218,
+      "pose_window": 11,
+      "predicted_transient_bytes": 770761498,
+      "safety_margin_bytes": 97087172,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 9323776,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 72842,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 41956992,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 72, 11, 11, True, True, 'float16')",
+      "source_poses": 11,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.013560342066281532,
+      "active_edges": 48,
+      "ba_edges": 72,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1073094249,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 962488552,
+      "measured_transient_peak_bytes": 757709824,
+      "mode": "vo",
+      "modeled_workspace_bytes": 975540226,
+      "observed_count": 445,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 204778728,
+      "pose_window": 11,
+      "predicted_transient_bytes": 770761498,
+      "safety_margin_bytes": 97554023,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 10171392,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 79464,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 45771264,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 72, 12, 11, True, True, 'float16')",
+      "source_poses": 12,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.01381219602424755,
+      "active_edges": 48,
+      "ba_edges": 74,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1073094249,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 962249448,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 975540226,
+      "observed_count": 8,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 204778728,
+      "pose_window": 11,
+      "predicted_transient_bytes": 770761498,
+      "safety_margin_bytes": 97554023,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 10171392,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 79464,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 45771264,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 74, 12, 11, True, True, 'float16')",
+      "source_poses": 12,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.014674421512372747,
+      "active_edges": 48,
+      "ba_edges": 80,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1074006893,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 962249448,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 976369902,
+      "observed_count": 4,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 204778728,
+      "pose_window": 12,
+      "predicted_transient_bytes": 771591174,
+      "safety_margin_bytes": 97636991,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 10171392,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 79464,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 45771264,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 80, 12, 12, True, True, 'float16')",
+      "source_poses": 12,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.015612394113885337,
+      "active_edges": 48,
+      "ba_edges": 86,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1069784176,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 957580938,
+      "measured_transient_peak_bytes": 757470720,
+      "mode": "vo",
+      "modeled_workspace_bytes": 972531069,
+      "observed_count": 7,
+      "peak_spread": 0.0,
+      "persistent_shadow_bytes": 200110218,
+      "pose_window": 13,
+      "predicted_transient_bytes": 772420851,
+      "safety_margin_bytes": 97253107,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 9323776,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 72842,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 41956992,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 86, 11, 13, True, True, 'float16')",
+      "source_poses": 11,
+      "split": "held_out",
+      "upsample": true,
+      "use_inactive": true
+    },
+    {
+      "absolute_percentage_error": 0.016127458309703708,
+      "active_edges": 48,
+      "ba_edges": 92,
+      "backend": "torch",
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1075832181,
+      "feature_shape": [
+        43,
+        77
+      ],
+      "frontend_image_size": [
+        344,
+        616
+      ],
+      "measured_target_bytes": 962506472,
+      "measured_transient_peak_bytes": 757727744,
+      "mode": "vo",
+      "modeled_workspace_bytes": 978029255,
+      "observed_count": 3,
+      "peak_spread": 0.00033920362826255445,
+      "persistent_shadow_bytes": 204778728,
+      "pose_window": 14,
+      "predicted_transient_bytes": 773250527,
+      "safety_margin_bytes": 97802926,
+      "sample_count": 2,
+      "shadow_terms": {
+        "aggregation_bytes": 10171392,
+        "ba_inputs_bytes": 0,
+        "corr_pyramid_bytes": 0,
+        "damping_bytes": 79464,
+        "delta_bytes": 1271424,
+        "motion_bytes": 2542848,
+        "recurrent_bytes": 81371136,
+        "sampled_corr_bytes": 62299776,
+        "upmask_bytes": 45771264,
+        "weight_bytes": 1271424
+      },
+      "signature_key": "(48, 92, 12, 14, True, True, 'float16')",
+      "source_poses": 12,
+      "split": "training",
+      "upsample": true,
+      "use_inactive": true
+    }
+  ],
+  "source_hashes": [
+    {
+      "path": "/home/jetson/VINGS-Mono/output/cuda_graph_dba_phase05_20260714/smallcity200/07-14-18-56-hierarchical-smallcit-cuda_graph_dba_phase05_smallcity200/runtime_profile_details.jsonl",
+      "sha256": "9408f0e1db1fa48667627a537073a02910db86f9038c752790b32da5447f835b"
+    },
+    {
+      "path": "/home/jetson/VINGS-Mono/output/cuda_graph_dba_phase05_20260714/hotel344/07-14-18-58-rtgslam-hote-cuda_graph_dba_phase05_hotel344/runtime_profile_details.jsonl",
+      "sha256": "7561852b196130164373dbce9a6cbe90cc87a9f397317002c2d3cdb709f73811"
+    }
+  ],
+  "validation": {
+    "held_out_keys": [
+      "(42, 49, 8, 7, True, True, 'float16')",
+      "(48, 68, 11, 10, True, True, 'float16')",
+      "(48, 86, 11, 13, True, True, 'float16')"
+    ],
+    "held_out_weighted_mape": 0.012405017407370522,
+    "maximum_peak_spread": 0.0022730776539257196,
+    "training_weighted_mape": 0.013100045063388145,
+    "underpredicted_signatures": [],
+    "unstable_signatures": [],
+    "valid": true,
+    "weighted_mape": 0.013084152662717011
+  }
+}

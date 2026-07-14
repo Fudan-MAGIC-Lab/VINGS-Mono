@@ -1,0 +1,46 @@
+{
+  "backend": "torch",
+  "buckets": [],
+  "coverage": 0.0,
+  "covered_calls": 0,
+  "feature_shape": [
+    43,
+    77
+  ],
+  "frontend_image_size": [
+    344,
+    616
+  ],
+  "memory_model": {
+    "calibration_sha256": "5a675f3f599f887459036d43cdf8d6dd255be4b0b8d1bb4a46a27370c61133b9",
+    "capture_boundary": "corr_update_aggregation",
+    "held_out_weighted_mape": 0.005066604675795035,
+    "kind": "calibrated",
+    "underprediction_count": 0,
+    "weighted_mape": 0.0053633013814680325
+  },
+  "mode": "vo",
+  "observed_signature_counts": {
+    "(24, 31, 5, 4, True, True, 'float16')": 16,
+    "(30, 37, 6, 5, True, True, 'float16')": 16,
+    "(36, 36, 8, 7, True, True, 'float16')": 48,
+    "(36, 43, 7, 6, True, True, 'float16')": 13,
+    "(42, 49, 8, 7, True, True, 'float16')": 19,
+    "(46, 66, 11, 10, True, True, 'float16')": 4,
+    "(48, 55, 9, 8, True, True, 'float16')": 13,
+    "(48, 60, 10, 9, True, True, 'float16')": 22,
+    "(48, 66, 11, 10, True, True, 'float16')": 568,
+    "(48, 68, 11, 10, True, True, 'float16')": 4,
+    "(48, 72, 11, 11, True, True, 'float16')": 122,
+    "(48, 72, 12, 11, True, True, 'float16')": 445,
+    "(48, 74, 12, 11, True, True, 'float16')": 8,
+    "(48, 80, 12, 12, True, True, 'float16')": 4,
+    "(48, 86, 11, 13, True, True, 'float16')": 7,
+    "(48, 92, 12, 14, True, True, 'float16')": 3
+  },
+  "schema_version": 1,
+  "supported_calls": 1312,
+  "total_calls": 1312,
+  "unsupported_calls": 0,
+  "workspace_breakdowns": {}
+}

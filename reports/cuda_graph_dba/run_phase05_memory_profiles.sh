@@ -52,8 +52,10 @@ check_residual_processes() {
 
 snapshot_environment() {
   git status --short > "$EVIDENCE_DIR/git_status.txt"
-  git submodule status --recursive \
-    > "$EVIDENCE_DIR/git_submodule_status.txt"
+  (
+    cd "$shared_root"
+    git submodule status --recursive
+  ) > "$EVIDENCE_DIR/git_submodule_status.txt"
   git rev-parse HEAD > "$EVIDENCE_DIR/git_head.txt"
   python --version > "$EVIDENCE_DIR/python_version.txt" 2>&1
   python -m pip freeze > "$EVIDENCE_DIR/pip_freeze.txt"

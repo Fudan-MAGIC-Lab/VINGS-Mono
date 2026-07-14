@@ -1,0 +1,77 @@
+{
+  "backend": "torch",
+  "buckets": [
+    {
+      "active_edges": 48,
+      "ba_edges": 74,
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1073094249,
+      "max_padding_ratio": 0.35,
+      "name": "e48_ba74_s12_p11_float16_inactive_up",
+      "pose_window": 11,
+      "source_poses": 12,
+      "upsample": true,
+      "use_inactive": true
+    }
+  ],
+  "coverage": 0.9184451219512195,
+  "covered_calls": 1205,
+  "feature_shape": [
+    43,
+    77
+  ],
+  "frontend_image_size": [
+    344,
+    616
+  ],
+  "memory_model": {
+    "calibration_sha256": "4c440a03f2aa96e76cbdef54b36a8dd7d0c9ba7ba4ef460ad9d9b482f366f835",
+    "capture_boundary": "update_aggregation_only",
+    "held_out_weighted_mape": 0.012405017407370522,
+    "kind": "calibrated",
+    "underprediction_count": 0,
+    "weighted_mape": 0.013084152662717011
+  },
+  "mode": "vo",
+  "observed_signature_counts": {
+    "(24, 31, 5, 4, True, True, 'float16')": 16,
+    "(30, 37, 6, 5, True, True, 'float16')": 16,
+    "(36, 36, 8, 7, True, True, 'float16')": 48,
+    "(36, 43, 7, 6, True, True, 'float16')": 13,
+    "(42, 49, 8, 7, True, True, 'float16')": 19,
+    "(46, 66, 11, 10, True, True, 'float16')": 4,
+    "(48, 55, 9, 8, True, True, 'float16')": 13,
+    "(48, 60, 10, 9, True, True, 'float16')": 22,
+    "(48, 66, 11, 10, True, True, 'float16')": 568,
+    "(48, 68, 11, 10, True, True, 'float16')": 4,
+    "(48, 72, 11, 11, True, True, 'float16')": 122,
+    "(48, 72, 12, 11, True, True, 'float16')": 445,
+    "(48, 74, 12, 11, True, True, 'float16')": 8,
+    "(48, 80, 12, 12, True, True, 'float16')": 4,
+    "(48, 86, 11, 13, True, True, 'float16')": 7,
+    "(48, 92, 12, 14, True, True, 'float16')": 3
+  },
+  "schema_version": 1,
+  "supported_calls": 1312,
+  "total_calls": 1312,
+  "unsupported_calls": 0,
+  "workspace_breakdowns": {
+    "e48_ba74_s12_p11_float16_inactive_up": {
+      "aggregation_bytes": 10171392,
+      "ba_inputs_bytes": 0,
+      "calibrated_transient_bytes": 770761498,
+      "corr_pyramid_bytes": 0,
+      "damping_bytes": 79464,
+      "delta_bytes": 1271424,
+      "estimated_workspace_bytes": 1073094249,
+      "modeled_workspace_bytes": 975540226,
+      "motion_bytes": 2542848,
+      "persistent_shadow_bytes": 204778728,
+      "recurrent_bytes": 81371136,
+      "safety_margin_bytes": 97554023,
+      "sampled_corr_bytes": 62299776,
+      "upmask_bytes": 45771264,
+      "weight_bytes": 1271424
+    }
+  }
+}
