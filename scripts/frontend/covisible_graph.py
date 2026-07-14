@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import cv2
 from contextlib import nullcontext
 from frontend.depth_video import DepthVideo
+from frontend.dba_bucket_manifest import DBACallSignature
 import matplotlib.cm as cm
 import matplotlib
 
@@ -65,6 +66,50 @@ class CovisibleGraph:
         if self.profiler is None:
             return nullcontext()
         return self.profiler.time(stage, self.profiler_frame_idx)
+
+    def _update_backend_name(self):
+        backend = getattr(self.update_op, "core_backend", None)
+        if backend is None:
+            return "torch"
+        return getattr(backend, "actual_backend", "unknown")
+
+    def _record_dba_signature(
+        self,
+        t0,
+        observed_t1,
+        use_inactive,
+        ba_edges,
+    ):
+        profiler = getattr(self, "profiler", None)
+        if profiler is None or not hasattr(profiler, "record_detail"):
+            return
+
+        call = DBACallSignature(
+            active_edges=int(self.ii.numel()),
+            ba_edges=int(ba_edges),
+            source_poses=int(torch.unique(self.ii).numel()),
+            pose_window=int(observed_t1 - t0),
+            use_inactive=bool(use_inactive),
+            upsample=bool(self.upsample),
+            dtype=str(self.net.dtype).replace("torch.", ""),
+            feature_shape=(int(self.ht), int(self.wd)),
+            frontend_image_size=(int(self.video.ht), int(self.video.wd)),
+            mode=str(self.video.cfg["mode"]),
+            backend=self._update_backend_name(),
+        )
+        payload = call.to_dict()
+        if torch.cuda.is_available():
+            payload["cuda_allocated_bytes"] = int(
+                torch.cuda.memory_allocated()
+            )
+            payload["cuda_reserved_bytes"] = int(
+                torch.cuda.memory_reserved()
+            )
+        profiler.record_detail(
+            "dba_signature",
+            payload,
+            frame_idx=getattr(self, "profiler_frame_idx", None),
+        )
 
     def __filter_repeated_edges(self, ii, jj):
         """ remove duplicate edges """
@@ -261,6 +306,16 @@ class CovisibleGraph:
                 weight = torch.cat([self.weight_inac[:,m], self.weight], 1)
             else:
                 ii, jj, target, weight = self.ii, self.jj, self.target, self.weight
+
+            observed_t1 = t1
+            if observed_t1 is None:
+                observed_t1 = max(ii.max().item(), jj.max().item()) + 1
+            self._record_dba_signature(
+                t0=t0,
+                observed_t1=observed_t1,
+                use_inactive=use_inactive,
+                ba_edges=int(ii.numel()),
+            )
 
             # Some real-time visualization for debugging
             # 1) Disparity
