@@ -1,0 +1,55 @@
+{
+  "backend": "torch",
+  "buckets": [
+    {
+      "active_edges": 31,
+      "ba_edges": 38,
+      "dtype": "float16",
+      "estimated_workspace_bytes": 1034619788,
+      "max_padding_ratio": 0.35,
+      "name": "e31_ba38_s6_p5_float16_inactive_up",
+      "pose_window": 5,
+      "source_poses": 6,
+      "upsample": true,
+      "use_inactive": true
+    }
+  ],
+  "coverage": 0.025943396226415096,
+  "covered_calls": 44,
+  "feature_shape": [
+    43,
+    77
+  ],
+  "frontend_image_size": [
+    344,
+    616
+  ],
+  "mode": "vo",
+  "observed_signature_counts": {
+    "(24, 31, 5, 4, True, True, 'float16')": 10,
+    "(25, 32, 5, 4, True, True, 'float16')": 12,
+    "(30, 37, 6, 5, True, True, 'float16')": 10,
+    "(31, 38, 6, 5, True, True, 'float16')": 12,
+    "(36, 36, 8, 7, True, True, 'float16')": 40,
+    "(36, 43, 7, 6, True, True, 'float16')": 7,
+    "(37, 44, 7, 6, True, True, 'float16')": 12,
+    "(38, 38, 8, 7, True, True, 'float16')": 32,
+    "(42, 49, 8, 7, True, True, 'float16')": 13,
+    "(43, 50, 8, 7, True, True, 'float16')": 12,
+    "(46, 66, 11, 10, True, True, 'float16')": 4,
+    "(48, 55, 9, 8, True, True, 'float16')": 19,
+    "(48, 60, 10, 9, True, True, 'float16')": 34,
+    "(48, 66, 11, 10, True, True, 'float16')": 832,
+    "(48, 68, 11, 10, True, True, 'float16')": 4,
+    "(48, 72, 11, 11, True, True, 'float16')": 176,
+    "(48, 72, 12, 11, True, True, 'float16')": 445,
+    "(48, 74, 12, 11, True, True, 'float16')": 8,
+    "(48, 80, 12, 12, True, True, 'float16')": 4,
+    "(48, 86, 11, 13, True, True, 'float16')": 7,
+    "(48, 92, 12, 14, True, True, 'float16')": 3
+  },
+  "schema_version": 1,
+  "supported_calls": 1696,
+  "total_calls": 1696,
+  "unsupported_calls": 0
+}
