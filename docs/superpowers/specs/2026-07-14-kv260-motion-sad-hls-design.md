@@ -83,11 +83,11 @@ transaction with a complete frame.
 
 Implementation will be isolated under `fpga/hls/motion_sad/`:
 
-- `include/motion_sad.hpp`: constants, AXI word type, and top-level declaration.
+- `include/motion_sad_accel.hpp`: constants, AXI word type, and top-level declaration.
 - `src/motion_sad.cpp`: synthesizable accelerator implementation.
 - `tb/test_motion_sad.cpp`: self-checking C simulation testbench.
 - `run_hls.tcl`: repeatable C simulation and C synthesis flow for Vitis HLS
-  2023.1.
+  2023.1, with local NTFS staging for SSHFS-hosted workspaces.
 - `README.md`: exact local commands and interpretation of generated reports.
 
 Generated Vitis HLS projects and reports will be ignored rather than committed.
