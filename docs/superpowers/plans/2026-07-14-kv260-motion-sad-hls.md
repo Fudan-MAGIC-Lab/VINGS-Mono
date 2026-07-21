@@ -1,0 +1,372 @@
+# KV260 Motion SAD HLS Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build and verify a Vitis HLS 2023.1 accelerator that reduces paired 320x180 grayscale frames to scalar SAD and changed-pixel motion signals.
+
+**Architecture:** A bounded AXI4-Stream transaction carries one previous/current 8-bit pixel pair per word. One pipelined loop accumulates absolute differences, counts differences above an AXI4-Lite threshold, and validates TLAST/TKEEP/TSTRB; a self-checking C++ testbench runs before K26 synthesis.
+
+**Tech Stack:** Vitis HLS 2023.1, synthesizable C++14, `hls::stream`, `ap_axiu`, Tcl, PowerShell, K26 part `xck26-sfvc784-2LV-c`.
+
+**Status:** Completed on 2026-07-14. Review hardening added early-TLAST packet preservation, byte-qualifier validation, stale-report invalidation, and unique local staging cleanup.
+
+---
+
+## File Map
+
+- `fpga/hls/motion_sad/include/motion_sad_accel.hpp`: constants, stream type, and top-level declaration.
+- `fpga/hls/motion_sad/src/motion_sad.cpp`: synthesizable datapath and HLS interfaces.
+- `fpga/hls/motion_sad/tb/test_motion_sad.cpp`: self-checking behavioral and TLAST tests.
+- `fpga/hls/motion_sad/run_hls.tcl`: repeatable C simulation and synthesis flow.
+- `fpga/hls/motion_sad/run_hls.ps1`: checked Windows wrapper and unique staging lifecycle.
+- `fpga/hls/motion_sad/.gitignore`: generated project exclusion.
+- `fpga/hls/motion_sad/README.md`: commands and interface documentation.
+
+### Task 1: Establish the failing C simulation
+
+**Files:**
+- Create: `fpga/hls/motion_sad/include/motion_sad_accel.hpp`
+- Create: `fpga/hls/motion_sad/src/motion_sad.cpp`
+- Create: `fpga/hls/motion_sad/tb/test_motion_sad.cpp`
+- Create: `fpga/hls/motion_sad/run_hls.tcl`
+- Create: `fpga/hls/motion_sad/.gitignore`
+
+- [x] **Step 1: Create the public interface**
+
+```cpp
+#ifndef MOTION_SAD_ACCEL_HPP
+#define MOTION_SAD_ACCEL_HPP
+
+#include <ap_axi_sdata.h>
+#include <ap_int.h>
+#include <hls_stream.h>
+
+constexpr int MOTION_FRAME_WIDTH = 320;
+constexpr int MOTION_FRAME_HEIGHT = 180;
+constexpr int MOTION_FRAME_PIXELS = MOTION_FRAME_WIDTH * MOTION_FRAME_HEIGHT;
+
+using motion_axis_t = ap_axiu<16, 0, 0, 0>;
+
+void motion_sad(
+    hls::stream<motion_axis_t>& pixel_pairs,
+    ap_uint<8> change_threshold,
+    ap_uint<32>& sad_sum,
+    ap_uint<32>& changed_pixels,
+    ap_uint<1>& frame_error);
+
+#endif
+```
+
+- [x] **Step 2: Add a compilable red-phase stub**
+
+```cpp
+#include "motion_sad_accel.hpp"
+
+void motion_sad(
+    hls::stream<motion_axis_t>& pixel_pairs,
+    ap_uint<8> change_threshold,
+    ap_uint<32>& sad_sum,
+    ap_uint<32>& changed_pixels,
+    ap_uint<1>& frame_error) {
+    (void)change_threshold;
+    for (int i = 0; i < MOTION_FRAME_PIXELS; ++i) {
+        (void)pixel_pairs.read();
+    }
+    sad_sum = 0;
+    changed_pixels = 0;
+    frame_error = 0;
+}
+```
+
+- [x] **Step 3: Add the self-checking testbench**
+
+```cpp
+#include "motion_sad_accel.hpp"
+
+#include <cstdint>
+#include <iostream>
+#include <string>
+
+namespace {
+
+struct Result {
+    uint32_t sad_sum;
+    uint32_t changed_pixels;
+    bool frame_error;
+};
+
+int failures = 0;
+
+template <typename PreviousPixel, typename CurrentPixel>
+Result run_frame(PreviousPixel previous_pixel, CurrentPixel current_pixel,
+                 uint8_t threshold,
+                 int last_index = MOTION_FRAME_PIXELS - 1) {
+    hls::stream<motion_axis_t> input;
+    for (int i = 0; i < MOTION_FRAME_PIXELS; ++i) {
+        motion_axis_t word;
+        word.data.range(7, 0) = ap_uint<8>(previous_pixel(i));
+        word.data.range(15, 8) = ap_uint<8>(current_pixel(i));
+        word.keep = -1;
+        word.strb = -1;
+        word.last = i == last_index;
+        input.write(word);
+    }
+
+    ap_uint<32> sad_sum = 0;
+    ap_uint<32> changed_pixels = 0;
+    ap_uint<1> frame_error = 0;
+    motion_sad(input, threshold, sad_sum, changed_pixels, frame_error);
+    return {static_cast<uint32_t>(sad_sum),
+            static_cast<uint32_t>(changed_pixels),
+            static_cast<bool>(frame_error)};
+}
+
+template <typename Actual, typename Expected>
+void expect_equal(const std::string& test_name, const std::string& field,
+                  Actual actual, Expected expected) {
+    if (actual != static_cast<Actual>(expected)) {
+        std::cerr << "[FAIL] " << test_name << " " << field
+                  << ": expected " << expected << ", got " << actual << '\n';
+        ++failures;
+    }
+}
+
+void test_identical_frames() {
+    const Result result = run_frame(
+        [](int i) { return static_cast<uint8_t>(i & 0xff); },
+        [](int i) { return static_cast<uint8_t>(i & 0xff); }, 5);
+    expect_equal("identical", "sad_sum", result.sad_sum, 0u);
+    expect_equal("identical", "changed_pixels", result.changed_pixels, 0u);
+    expect_equal("identical", "frame_error", result.frame_error, false);
+}
+
+void test_uniform_difference() {
+    const Result result = run_frame(
+        [](int) { return static_cast<uint8_t>(10); },
+        [](int) { return static_cast<uint8_t>(20); }, 5);
+    expect_equal("uniform", "sad_sum", result.sad_sum, 576000u);
+    expect_equal("uniform", "changed_pixels", result.changed_pixels, 57600u);
+    expect_equal("uniform", "frame_error", result.frame_error, false);
+}
+
+void test_threshold_boundary() {
+    const Result result = run_frame(
+        [](int) { return static_cast<uint8_t>(40); },
+        [](int) { return static_cast<uint8_t>(47); }, 7);
+    expect_equal("threshold", "sad_sum", result.sad_sum, 403200u);
+    expect_equal("threshold", "changed_pixels", result.changed_pixels, 0u);
+    expect_equal("threshold", "frame_error", result.frame_error, false);
+}
+
+void test_sparse_changes() {
+    const Result result = run_frame(
+        [](int) { return static_cast<uint8_t>(0); },
+        [](int i) { return static_cast<uint8_t>(i % 1000 == 0 ? 100 : 0); },
+        50);
+    expect_equal("sparse", "sad_sum", result.sad_sum, 5800u);
+    expect_equal("sparse", "changed_pixels", result.changed_pixels, 58u);
+    expect_equal("sparse", "frame_error", result.frame_error, false);
+}
+
+void test_early_last() {
+    const Result result = run_frame(
+        [](int) { return static_cast<uint8_t>(0); },
+        [](int) { return static_cast<uint8_t>(0); }, 0, 100);
+    expect_equal("early_last", "frame_error", result.frame_error, true);
+}
+
+void test_missing_last() {
+    const Result result = run_frame(
+        [](int) { return static_cast<uint8_t>(0); },
+        [](int) { return static_cast<uint8_t>(0); }, 0, -1);
+    expect_equal("missing_last", "frame_error", result.frame_error, true);
+}
+
+}  // namespace
+
+int main() {
+    test_identical_frames();
+    test_uniform_difference();
+    test_threshold_boundary();
+    test_sparse_changes();
+    test_early_last();
+    test_missing_last();
+
+    if (failures != 0) {
+        std::cerr << failures << " assertion(s) failed\n";
+        return 1;
+    }
+    std::cout << "All motion_sad tests passed\n";
+    return 0;
+}
+```
+
+The final review-expanded testbench also covers reverse maximum difference,
+an early-TLAST packet followed by a complete packet, and invalid TKEEP/TSTRB.
+The snippet above records the initial red phase; the checked-in testbench is
+the authoritative final version.
+
+- [x] **Step 4: Add the HLS script and ignore generated output**
+
+The final `run_hls.tcl` stages inputs on local NTFS, removes old copied
+reports before a run, and copies new reports atomically. `run_hls.ps1`
+provides each invocation with a unique staging directory, checks both process
+status and Vitis `ERROR:` output, and removes the stage only after Vitis exits.
+
+```gitignore
+build/
+vitis_hls.log
+```
+
+- [x] **Step 5: Run C simulation and verify the red phase**
+
+```powershell
+.\run_hls.ps1
+```
+
+Expected: nonzero exit. Uniform, threshold, sparse, early-TLAST, and missing-TLAST assertions fail, proving the testbench detects the stub. The later review red phase also proved that the old implementation consumed the next packet and ignored invalid byte qualifiers.
+
+### Task 2: Implement the pipelined SAD datapath
+
+**Files:**
+- Modify: `fpga/hls/motion_sad/src/motion_sad.cpp`
+- Test: `fpga/hls/motion_sad/tb/test_motion_sad.cpp`
+
+- [x] **Step 1: Replace the stub with the synthesizable implementation**
+
+```cpp
+#include "motion_sad_accel.hpp"
+
+void motion_sad(
+    hls::stream<motion_axis_t>& pixel_pairs,
+    ap_uint<8> change_threshold,
+    ap_uint<32>& sad_sum,
+    ap_uint<32>& changed_pixels,
+    ap_uint<1>& frame_error) {
+#pragma HLS INTERFACE axis port=pixel_pairs
+#pragma HLS INTERFACE s_axilite port=change_threshold bundle=control
+#pragma HLS INTERFACE s_axilite port=sad_sum bundle=control
+#pragma HLS INTERFACE s_axilite port=changed_pixels bundle=control
+#pragma HLS INTERFACE s_axilite port=frame_error bundle=control
+#pragma HLS INTERFACE s_axilite port=return bundle=control
+
+    ap_uint<32> sad_accumulator = 0;
+    ap_uint<32> changed_accumulator = 0;
+    ap_uint<1> error = 0;
+
+    for (int i = 0; i < MOTION_FRAME_PIXELS; ++i) {
+#pragma HLS PIPELINE II=1
+        const motion_axis_t word = pixel_pairs.read();
+        const ap_uint<8> previous = word.data.range(7, 0);
+        const ap_uint<8> current = word.data.range(15, 8);
+        const ap_uint<8> difference =
+            current >= previous ? current - previous : previous - current;
+        const bool expected_last = i == MOTION_FRAME_PIXELS - 1;
+        const bool received_last = static_cast<bool>(word.last);
+
+        sad_accumulator += difference;
+        if (difference > change_threshold) {
+            ++changed_accumulator;
+        }
+        if (received_last != expected_last || word.keep != 3 || word.strb != 3) {
+            error = 1;
+        }
+        if (received_last) {
+            break;
+        }
+    }
+
+    sad_sum = sad_accumulator;
+    changed_pixels = changed_accumulator;
+    frame_error = error;
+}
+```
+
+- [x] **Step 2: Run C simulation and verify the green phase**
+
+```powershell
+.\run_hls.ps1
+```
+
+Expected: exit 0, `All motion_sad tests passed`, and `CSim done with 0 errors`.
+
+- [x] **Step 3: Commit the tested accelerator**
+
+```powershell
+git add fpga/hls/motion_sad/include/motion_sad_accel.hpp fpga/hls/motion_sad/src/motion_sad.cpp fpga/hls/motion_sad/tb/test_motion_sad.cpp fpga/hls/motion_sad/run_hls.tcl fpga/hls/motion_sad/.gitignore
+git commit -m "feat: add KV260 motion SAD HLS core"
+```
+
+### Task 3: Synthesize for K26 and document the workflow
+
+**Files:**
+- Create: `fpga/hls/motion_sad/README.md`
+- Inspect: `fpga/hls/motion_sad/build/motion_sad_prj/solution1/syn/report/motion_sad_csynth.rpt`
+
+- [x] **Step 1: Run C simulation and C synthesis**
+
+```powershell
+.\run_hls.ps1 -Synthesize
+```
+
+Expected: exit 0, passing C simulation, and a report for `xck26-sfvc784-2LV-c` with a 10 ns target clock.
+
+- [x] **Step 2: Verify pipeline, timing, and resources**
+
+```powershell
+$report = 'build\motion_sad_prj\solution1\syn\report\motion_sad_csynth.rpt'
+Select-String -Path $report -Pattern 'Timing|Latency|Interval|PIPELINE|DSP|BRAM|LUT|FF'
+```
+
+Expected: the frame loop achieves II 1, estimated period is below 10 ns, no floating-point operators appear, and scalar-core resource use is small relative to K26 capacity. If synthesis fails or II exceeds 1, stop at the first scheduling/dependency diagnostic before changing code.
+
+- [x] **Step 3: Add `README.md`**
+
+```markdown
+# Motion SAD HLS Core
+
+This offline FPGA milestone consumes paired 320x180 grayscale frames and
+returns scalar motion statistics. It does not require a booted KV260.
+
+## Input
+
+Each AXI4-Stream word is 16 bits: bits 7:0 contain the previous pixel, bits
+15:8 contain the current pixel, and TLAST is asserted only on pixel 57,599.
+The core returns total SAD, the number of differences strictly greater than
+`change_threshold`, and a frame-format error flag.
+
+## C simulation
+
+```powershell
+.\run_hls.ps1
+```
+
+Success includes `All motion_sad tests passed` and `CSim done with 0 errors`.
+
+## K26 synthesis
+
+```powershell
+.\run_hls.ps1 -Synthesize
+```
+
+The report is at
+`build/motion_sad_prj/solution1/syn/report/motion_sad_csynth.rpt`. Check the
+frame loop for II 1, the timing estimate against 10 ns, and BRAM, DSP, LUT,
+and FF utilization. The generated `build/` directory is not committed.
+```
+
+- [x] **Step 4: Re-run complete verification**
+
+```powershell
+.\run_hls.ps1 -Synthesize
+git diff --check
+```
+
+Expected: C simulation and synthesis pass, the loop achieves II 1, and `git diff --check` emits no output.
+
+- [x] **Step 5: Commit the documentation**
+
+```powershell
+git add fpga/hls/motion_sad/README.md
+git commit -m "docs: document motion SAD HLS workflow"
+```
